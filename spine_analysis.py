@@ -90,20 +90,20 @@ def denoise_mov(movie,ncomp=1,batch_size=1000):
     movie2 = caiman.movie(np.reshape(np.float32(proj_frame_vectors.T), movie.shape))
     return movie2, eigenframes
 
-def motion_correct_file( fn, cfg = default_config, n_iter=0,max_iter=10):
+def motion_correct_file( fn, save_dir, max_shifts, strides, overlaps, max_deviation_rigid, shifts_opencv, border_nan, n_iter=0,max_iter=10):
     try:
-        mc = MotionCorrect(fn, dview=None, max_shifts=cfg['max_shifts'],
-                      strides=cfg['strides'], overlaps=cfg['overlaps'],
-                      max_deviation_rigid=cfg['max_deviation_rigid'],
-                      shifts_opencv=cfg['shifts_opencv'], nonneg_movie=True,
+        mc = MotionCorrect(fn, dview=None, max_shifts=max_shifts,
+                      strides=strides, overlaps=overlaps,
+                      max_deviation_rigid=max_deviation_rigid,
+                      shifts_opencv=shifts_opencv, nonneg_movie=True,
                       splits_els=1,splits_rig=1,
-                      border_nan=cfg['border_nan'], save_dir=cfg['save_dir'])
+                      border_nan=border_nan, save_dir=save_dir)
         mc.motion_correct(save_movie=True)
         return mc.mmap_file
-    except:
+    except Exception as e:
         if n_iter < max_iter:
-            print("Retrying %s"%fn)
-            return motion_correct_file(fn,cfg,n_iter+1)
+            print("Retrying %s due to %s"%(fn, e))
+            return motion_correct_file(fn, save_dir, max_shifts, strides, overlaps, max_deviation_rigid, shifts_opencv, border_nan, n_iter+1)
         else:
             return Exception("Failed max_iter: %s times"%max_iter)
 
@@ -115,7 +115,7 @@ class AlignmentHelper(object):
 
         self.dview = None
         self.max_shifts = cfg["max_shifts"]
-        self.strides = cfg["strides":]
+        self.strides = cfg["strides"]
         self.overlaps = cfg["overlaps"]
         self.num_frames_split = cfg["num_frames_split"]
         self.max_deviation_rigid = cfg["max_deviation_rigid"]
@@ -131,20 +131,20 @@ class AlignmentHelper(object):
         self.nplanes = cfg["nplanes"]
         self.nimgs = cfg["nimgs"]
 
-        self.prj_dir = os.path.join(server_dir,prj)
+        self.prj_dir = os.path.join(self.server_dir, self.prj)
 
-        self.struc_fnames = { x: glob.glob(os.path.join(prj_dir, "%s*_%s/*.tif"%(prj,x))) for x in self.struct_nums }
-        self.func_fnames = { x: glob.glob(os.path.join(prj_dir, "%s*_%s/*.tif"%(prj,x))) for x in self.func_nums }
+        self.struc_fnames = { x: glob.glob(os.path.join(self.prj_dir, "%s*_%s/*.tif"%(self.prj,x))) for x in self.struct_nums }
+        self.func_fnames = { x: glob.glob(os.path.join(self.prj_dir, "%s*_%s/*.tif"%(self.prj,x))) for x in self.func_nums }
 
-        self.base_folder = '/home/silvio/Documents/logan/spine_project/%s'%prj
-        self.save_dir=os.path.join(base_folder,"struct_mmaps/")
+        self.base_folder = '/home/silvio/Documents/logan/spine_project/%s'%self.prj
+        self.save_dir=os.path.join(self.base_folder,"struct_mmaps/")
 
-        save_dir=os.path.join(base_folder,"struct_mmaps/")
-        if not os.path.isdir(save_dir):
-            os.makedirs(save_dir)
+        self.save_dir=os.path.join(self.base_folder,"struct_mmaps/")
+        if not os.path.isdir(self.save_dir):
+            os.makedirs(self.save_dir)
 
         print("loading test movie")
-        self.testm = caiman.load([struc_fnames[0][0]])
+        self.testm = caiman.load([self.struc_fnames[self.struct_nums[0]][0]])
 
 
     def align_structural_data(self):
@@ -153,15 +153,17 @@ class AlignmentHelper(object):
         for n in self.struc_fnames:
             struc_fnames = self.struc_fnames[n]
             print("Processing structural dataset %s" % n)
+            args = [(fn, self.save_dir, self.max_shifts, self.strides, self.overlaps, self.max_deviation_rigid, self.shifts_opencv, self.border_nan) for fn in struc_fnames]
+
             pool = multiprocessing.Pool(8)
-            mmap_files = list(tqdm.tqdm(pool.imap(motion_correct_file,struc_fnames),total=len(struc_fnames)))
+            pool.starmap(motion_correct_file,args)
 
             # take median filters of the newly aligned stacks and register them
             mmap_files = glob.glob(os.path.join(self.save_dir,"*.mmap"))
             out_tiffname = os.path.join(self.base_folder,"%s_struc_%s.tiff"%(self.prj,n))
 
-            denoise_ds = np.zeros((len(mmap_files),self.testm.shape[1],self.testm.shape[2]),dtype=testm.dtype)
-            aligned_ds = np.zeros((len(mmap_files),self.testm.shape[1],self.testm.shape[2]),dtype=testm.dtype)
+            denoise_ds = np.zeros((len(mmap_files),self.testm.shape[1],self.testm.shape[2]),dtype=self.testm.dtype)
+            aligned_ds = np.zeros((len(mmap_files),self.testm.shape[1],self.testm.shape[2]),dtype=self.testm.dtype)
 
             # go through all the mmap files
             for f in mmap_files:
@@ -180,7 +182,7 @@ class AlignmentHelper(object):
             #tf.imsave(out_tiffname,denoise_ds)
 
             #align the denoised items to eachother
-            aligned_ds[0,:,:] = out_zarr[denoised_dsn][0,:,:]
+            aligned_ds[0,:,:] = denoise_ds[0,:,:]
             for i in range(1,len(aligned_ds)):
                 s,e,d = skimage.feature.register_translation(aligned_ds[i-1,:,:],denoised_ds[i,:,:],100)
                 print(s)
