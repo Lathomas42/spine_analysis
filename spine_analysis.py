@@ -22,6 +22,7 @@ import sys
 import time
 import logging
 import tifffile as tf
+import json
 
 try:
     cv2.setNumThreads(0)
@@ -64,15 +65,21 @@ default_config = {
     "shifts_opencv": True,  # flag for correcting motion using bicubic interpolation (otherwise FFT interpolation is used)
     "border_nan": 'copy',  # replicate values along the boundary (if True, fill in with NaN)
     # first do the structural data in the _2 folder
-    "server_dir": "/home/silvio/recurrence/rotons/", #"/home/silvio/modulation/frankenshare/Silvio-Transfer/
-    "prj": "20191209", #"20191128"
+    "server_dir": "/global/scratch/logan_thomas/",
+    "output_dir": "/global/scratch/logan_thomas/output/",
+    "prj": "20191209",
     "struct_nums":[2], #list of all _# for structural data
     "func_nums":[1], #list of all _# for functional data
     # functional data
     "nchannels" : 2,
     "nplanes" : 4,
     "nimgs" : 27,
+    "num_proc": 16
 }
+
+def create_config(path):
+    with open(path,'w') as outfile:
+        json.dump(default_config,outfile,indent=2)
 
 def denoise_mov(movie,ncomp=1,batch_size=1000):
     """
@@ -130,16 +137,15 @@ class AlignmentHelper(object):
         self.nchannels = cfg["nchannels"]
         self.nplanes = cfg["nplanes"]
         self.nimgs = cfg["nimgs"]
-
+        self.num_proc=cfg["num_proc"]
         self.prj_dir = os.path.join(self.server_dir, self.prj)
 
         self.struc_fnames = { x: glob.glob(os.path.join(self.prj_dir, "%s*_%s/*.tif"%(self.prj,x))) for x in self.struct_nums }
         self.func_fnames = { x: glob.glob(os.path.join(self.prj_dir, "%s*_%s/*.tif"%(self.prj,x))) for x in self.func_nums }
 
-        self.base_folder = '/home/silvio/Documents/logan/spine_project/%s'%self.prj
+        self.base_folder = os.patj.join(cfg['output_dir'],self.prj)
         self.save_dir=os.path.join(self.base_folder,"struct_mmaps/")
 
-        self.save_dir=os.path.join(self.base_folder,"struct_mmaps/")
         if not os.path.isdir(self.save_dir):
             os.makedirs(self.save_dir)
 
@@ -344,3 +350,21 @@ class AlignmentHelper(object):
                 # load the green data and scale it and shift it
                 out_zarr['func_green_shifts'][p,:] = rettot[p,planes[p],2]
                 #skimage.transform.resize(mmgreen,np.asarray(mmgreen.shape)*[1,7.8,7.8]//[1,9,9])
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description = "Run alignment and registration of volumes using python")
+    parser.add_argument('config_file', help='path to config file for this task')
+    parser.add_argument('--struct', action='store_true', help='align structural data')
+    parser.add_argument('--func', action='store_true', help='align functional data (requires struct data to have been aligned)')
+    parser.parse_args()
+
+    if not os.path.exists(parser.config_file):
+        create_config(parser.config_file)
+        return
+
+    print("Creating AlignmentHelper object with %s"%parser.config_file)
+    align_obj = AlignmentHelper(parser.config_file)
+
+    if parser.struct:
+        align_obj.align_structural_data()
+

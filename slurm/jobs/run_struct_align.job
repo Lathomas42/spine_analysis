@@ -1,0 +1,29 @@
+#!/bin/bash
+#SBATCH --job-name=struct_align
+#SBATCH --partition=savio
+#SBATCH -N 1
+#SBATCH -n 1
+#SBATCH --mem=60G
+#SBATCH --cpus-per-task=16
+#SBATCH --time=0-2:00:00 #12 hrs
+#SBATCH --output=/global/home/users/logan_thomas/github/spine_analysis/slurm/logs/%x.%J.out 
+#SBATCH --error=/global/home/users/logan_thomas/github/spine_analysis/slurm/logs/%x.%J.err
+
+
+source activate caiman
+PRJ=$1
+CFG=~/github/spine_analysis/run_configs/${PRJ}.json
+if [ -f "$CFG" ]; then
+    echo "Found $CFG"
+else
+    echo "Creating $CFG. edit this file then rerun the command"
+    python ~/github/spine_analysis/spine_analysis.py $CFG
+fi
+
+
+echo "Running structural alignment for prj $PRJ"
+
+if 
+
+python ~/github/spine_analysis/spine_analysis.py $CFG --struct
+
