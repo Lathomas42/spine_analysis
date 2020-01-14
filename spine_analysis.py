@@ -159,17 +159,31 @@ class AlignmentHelper(object):
         for n in self.struc_fnames:
             struc_fnames = self.struc_fnames[n]
             print("Processing structural dataset %s" % n)
+            
+            # remove fnames that have been done before
+            struc_fnames = [ f for f in struc_fnames if not os.path.exists(os.path.join(os.path.basename(os.path.splitext(f)[0]))) ]
+
+            print("Running motion correction across %s files "%len(struc_fnames))
+
             args = [(fn, self.save_dir, self.max_shifts, self.strides, self.overlaps, self.max_deviation_rigid, self.shifts_opencv, self.border_nan) for fn in struc_fnames]
 
-            pool = multiprocessing.Pool(self.num_proc)
+            pool = multiprocessing.Pool(min(self.num_proc,len(struc_fnames)))
             pool.starmap(motion_correct_file,args)
 
             # take median filters of the newly aligned stacks and register them
             mmap_files = glob.glob(os.path.join(self.save_dir,"*.mmap"))
-            out_tiffname = os.path.join(self.base_folder,"%s_struc_%s.tiff"%(self.prj,n))
+            mmap_inds = [ int(f.split('/')[-1].split('_')[5]) - 1 for f in mmap_files ]
 
-            denoise_ds = np.zeros((len(mmap_files),self.testm.shape[1],self.testm.shape[2]),dtype=self.testm.dtype)
-            aligned_ds = np.zeros((len(mmap_files),self.testm.shape[1],self.testm.shape[2]),dtype=self.testm.dtype)
+            # check if any inds missing and report it
+            missing = [ x for x in range(max(mmap_inds+1)) if x not in mmap_inds ]
+            if len(missing) > 0:
+                print("###---------------------------------------")
+                print("WARNING: Missing ",missing)
+                print("###---------------------------------------")
+            out_tiffname = os.path.join(self.base_folder,"%s_struc_%s.tif"%(self.prj,n))
+
+            denoise_ds = np.zeros((max(mmap_inds),self.testm.shape[1],self.testm.shape[2]),dtype=self.testm.dtype)
+            aligned_ds = np.zeros((max(mmap_inds),self.testm.shape[1],self.testm.shape[2]),dtype=self.testm.dtype)
 
             # go through all the mmap files
             for f in mmap_files:
@@ -177,7 +191,7 @@ class AlignmentHelper(object):
                     f = f[0]
                 ind = int(f.split('/')[-1].split('_')[5]) - 1
                 ds = caiman.load(f)
-                dnm, ev = denoise_mov(ds,1,1000)
+                dnm, _ = denoise_mov(ds,1,1000)
                 denoise_ds[ind,:,:] = dnm.mean(axis=0)
 
                 # remove the file
