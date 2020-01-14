@@ -9,7 +9,7 @@ from builtins import str
 from builtins import map
 from builtins import range
 from past.utils import old_div
-
+import argparse
 import cv2
 import glob
 import matplotlib.pyplot as plt
@@ -117,7 +117,7 @@ def motion_correct_file( fn, save_dir, max_shifts, strides, overlaps, max_deviat
 
 class AlignmentHelper(object):
     def __init__(self,cfg=default_config):
-        if cfg is str:
+        if isinstance(cfg, str):
             cfg = json.load(open(cfg,'r'))
 
         self.dview = None
@@ -143,7 +143,7 @@ class AlignmentHelper(object):
         self.struc_fnames = { x: glob.glob(os.path.join(self.prj_dir, "%s*_%s/*.tif"%(self.prj,x))) for x in self.struct_nums }
         self.func_fnames = { x: glob.glob(os.path.join(self.prj_dir, "%s*_%s/*.tif"%(self.prj,x))) for x in self.func_nums }
 
-        self.base_folder = os.patj.join(cfg['output_dir'],self.prj)
+        self.base_folder = os.path.join(cfg['output_dir'],self.prj)
         self.save_dir=os.path.join(self.base_folder,"struct_mmaps/")
 
         if not os.path.isdir(self.save_dir):
@@ -161,7 +161,7 @@ class AlignmentHelper(object):
             print("Processing structural dataset %s" % n)
             args = [(fn, self.save_dir, self.max_shifts, self.strides, self.overlaps, self.max_deviation_rigid, self.shifts_opencv, self.border_nan) for fn in struc_fnames]
 
-            pool = multiprocessing.Pool(8)
+            pool = multiprocessing.Pool(self.num_proc)
             pool.starmap(motion_correct_file,args)
 
             # take median filters of the newly aligned stacks and register them
@@ -356,15 +356,15 @@ if __name__ == '__main__':
     parser.add_argument('config_file', help='path to config file for this task')
     parser.add_argument('--struct', action='store_true', help='align structural data')
     parser.add_argument('--func', action='store_true', help='align functional data (requires struct data to have been aligned)')
-    parser.parse_args()
+    args = parser.parse_args()
 
-    if not os.path.exists(parser.config_file):
-        create_config(parser.config_file)
-        return
+    if not os.path.exists(args.config_file):
+        create_config(args.config_file)
+        sys.exit(0)
 
-    print("Creating AlignmentHelper object with %s"%parser.config_file)
-    align_obj = AlignmentHelper(parser.config_file)
+    print("Creating AlignmentHelper object with %s"%args.config_file)
+    align_obj = AlignmentHelper(args.config_file)
 
-    if parser.struct:
+    if args.struct:
         align_obj.align_structural_data()
 
