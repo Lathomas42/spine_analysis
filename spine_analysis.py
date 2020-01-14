@@ -161,7 +161,7 @@ class AlignmentHelper(object):
             print("Processing structural dataset %s" % n)
             
             # remove fnames that have been done before
-            struc_fnames = [ f for f in struc_fnames if not os.path.exists(os.path.join(os.path.basename(os.path.splitext(f)[0]))) ]
+            struc_fnames = [ f for f in struc_fnames if not os.path.exists(os.path.join(self.save_dir,os.path.basename(os.path.splitext(f)[0]),'.mmap')) ]
 
             print("Running motion correction across %s files "%len(struc_fnames))
 
