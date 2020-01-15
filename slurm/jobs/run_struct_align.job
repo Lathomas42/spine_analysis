@@ -10,20 +10,19 @@
 #SBATCH --error=/global/home/users/logan_thomas/github/spine_analysis/slurm/logs/%x.%J.err
 
 
-source activate caiman
+#source activate caiman
 PRJ=$1
-CFG=~/github/spine_analysis/run_configs/${PRJ}.json
+CFG=${SPINE_ANALYSIS_DIR}run_configs/${PRJ}.json
 if [ -f "$CFG" ]; then
     echo "Found $CFG"
 else
     echo "Creating $CFG. edit this file then rerun the command"
-    python ~/github/spine_analysis/spine_analysis.py $CFG
+    python ${SPINE_ANALYSIS_DIR}spine_analysis.py $CFG
+    exit 0
 fi
 
 
 echo "Running structural alignment for prj $PRJ"
 
-if 
-
-python ~/github/spine_analysis/spine_analysis.py $CFG --struct
+python ${SPINE_ANALYSIS_DIR}spine_analysis.py $CFG --struct
 
