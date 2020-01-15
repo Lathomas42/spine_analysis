@@ -159,31 +159,30 @@ class AlignmentHelper(object):
         for n in self.struc_fnames:
             struc_fnames = self.struc_fnames[n]
             print("Processing structural dataset %s" % n)
-            
+            print(os.path.join(self.save_dir,os.path.basename(os.path.splitext(struc_fnames[10])[0])+'.mmap'))
             # remove fnames that have been done before
-            struc_fnames = [ f for f in struc_fnames if not os.path.exists(os.path.join(self.save_dir,os.path.basename(os.path.splitext(f)[0]),'.mmap')) ]
-
+            struc_fnames = [ f for f in struc_fnames if len(glob.glob(os.path.join(self.save_dir,os.path.basename(os.path.splitext(f)[0])+'*.mmap'))) == 0 ]
             print("Running motion correction across %s files "%len(struc_fnames))
+            if len(struc_fnames) > 0:
+                args = [(fn, self.save_dir, self.max_shifts, self.strides, self.overlaps, self.max_deviation_rigid, self.shifts_opencv, self.border_nan) for fn in struc_fnames]
 
-            args = [(fn, self.save_dir, self.max_shifts, self.strides, self.overlaps, self.max_deviation_rigid, self.shifts_opencv, self.border_nan) for fn in struc_fnames]
-
-            pool = multiprocessing.Pool(min(self.num_proc,len(struc_fnames)))
-            pool.starmap(motion_correct_file,args)
+                pool = multiprocessing.Pool(min(self.num_proc,len(struc_fnames)))
+                pool.starmap(motion_correct_file,args)
 
             # take median filters of the newly aligned stacks and register them
             mmap_files = glob.glob(os.path.join(self.save_dir,"*.mmap"))
             mmap_inds = [ int(f.split('/')[-1].split('_')[5]) - 1 for f in mmap_files ]
 
             # check if any inds missing and report it
-            missing = [ x for x in range(max(mmap_inds+1)) if x not in mmap_inds ]
+            missing = [ x for x in range(max(mmap_inds)+1) if x not in mmap_inds ]
             if len(missing) > 0:
                 print("###---------------------------------------")
                 print("WARNING: Missing ",missing)
                 print("###---------------------------------------")
             out_tiffname = os.path.join(self.base_folder,"%s_struc_%s.tif"%(self.prj,n))
 
-            denoise_ds = np.zeros((max(mmap_inds),self.testm.shape[1],self.testm.shape[2]),dtype=self.testm.dtype)
-            aligned_ds = np.zeros((max(mmap_inds),self.testm.shape[1],self.testm.shape[2]),dtype=self.testm.dtype)
+            denoise_ds = np.zeros((max(mmap_inds)+1,self.testm.shape[1],self.testm.shape[2]),dtype=self.testm.dtype)
+            aligned_ds = np.zeros((max(mmap_inds)+1,self.testm.shape[1],self.testm.shape[2]),dtype=self.testm.dtype)
 
             # go through all the mmap files
             for f in mmap_files:
@@ -204,9 +203,9 @@ class AlignmentHelper(object):
             #align the denoised items to eachother
             aligned_ds[0,:,:] = denoise_ds[0,:,:]
             for i in range(1,len(aligned_ds)):
-                s,e,d = skimage.feature.register_translation(aligned_ds[i-1,:,:],denoised_ds[i,:,:],100)
+                s,e,d = skimage.feature.register_translation(aligned_ds[i-1,:,:],denoise_ds[i,:,:],100)
                 print(s)
-                oi = scipy.ndimage.fourier_shift(np.fft.fftn(denoised_ds[i,:,:]),s)
+                oi = scipy.ndimage.fourier_shift(np.fft.fftn(denoise_ds[i,:,:]),s)
                 aligned_ds[i,:,:] = np.fft.ifftn(oi)
 
             # save the aligned dataset
