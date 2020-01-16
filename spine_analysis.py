@@ -125,14 +125,14 @@ def denoise_mov(movie,ncomp=1,batch_size=1000):
     movie2 = caiman.movie(np.reshape(np.float32(proj_frame_vectors.T), movie.shape))
     return movie2, eigenframes
 
-def motion_correct_file( fn, save_dir, max_shifts, strides, overlaps, max_deviation_rigid, shifts_opencv, border_nan, n_iter=0,max_iter=10):
+def motion_correct_file( fn, save_dir, max_shifts, strides, overlaps, max_deviation_rigid, shifts_opencv, border_nan, subidx=slice(None,None,1), n_iter=0,max_iter=10):
     try:
         mc = MotionCorrect(fn, dview=None, max_shifts=max_shifts,
                       strides=strides, overlaps=overlaps,
                       max_deviation_rigid=max_deviation_rigid,
                       shifts_opencv=shifts_opencv, nonneg_movie=True,
                       splits_els=1,splits_rig=1,
-                      border_nan=border_nan, save_dir=save_dir)
+                      border_nan=border_nan, subidx=subidx, save_dir=save_dir)
         mc.motion_correct(save_movie=True)
         return mc.mmap_file
     except Exception as e:
@@ -199,8 +199,9 @@ class AlignmentHelper(object):
             # remove fnames that have been done before
             struc_fnames = [ f for f in struc_fnames if len(glob.glob(os.path.join(self.save_dir,os.path.basename(os.path.splitext(f)[0])+'*.mmap'))) == 0 ]
             print("Running motion correction across %s files "%len(struc_fnames))
+            st_slice = slice(self.struc_cfg[x]['red_ind'],None,self.struc_cfg[x]['nchan'])
             if len(struc_fnames) > 0:
-                args = [(fn, self.save_dir, self.max_shifts, self.strides, self.overlaps, self.max_deviation_rigid, self.shifts_opencv, self.border_nan) for fn in struc_fnames]
+                args = [(fn, self.save_dir, self.max_shifts, self.strides, self.overlaps, self.max_deviation_rigid, self.shifts_opencv, self.border_nan, st_slice) for fn in struc_fnames]
 
                 pool = multiprocessing.Pool(min(self.num_proc,len(struc_fnames)))
                 pool.starmap(motion_correct_file,args)
