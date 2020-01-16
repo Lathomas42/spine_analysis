@@ -52,7 +52,7 @@ from ScanImageTiffReader import ScanImageTiffReader
 from skimage.external import tifffile as tif
 from caiman.motion_correction import MotionCorrect, tile_and_correct, motion_correction_piecewise
 from caiman.utils.utils import download_demo
-
+import configparser
 
 # In[ ]:
 default_config = {
@@ -77,8 +77,8 @@ class MetadataParser(object):
         with ScanImageTiffReader(file) as reader:
             mds = reader.metadata()
             self.metadata = configparser.ConfigParser()
-            self.metadata.read_string('[SIvars]\n'+mds[:self.metadata.find('\n\n')])
-            self.jsdata = json.loads(mds[self.metadata.find('\n\n'):])
+            self.metadata.read_string('[SIvars]\n'+mds[:mds.find('\n\n')])
+            self.jsdata = json.loads(mds[mds.find('\n\n'):])
 
     def _get_var(self, varname):
         return self.metadata['SIvars'][varname]
@@ -178,8 +178,9 @@ class AlignmentHelper(object):
             os.makedirs(self.save_dir)
 
         # get metadata
-        self.struc_cfg = {}
+        self.struc_cfg = dict()
         for x in self.struct_nums:
+            self.struc_cfg[x] = dict()
             struct_metadata = MetadataParser(self.struc_fnames[x][0])
             self.struc_cfg[x]['red_ind'] = struct_metadata.get_channel_index('red')
             self.struc_cfg[x]['nchan'] = struct_metadata.get_nchannels()
@@ -199,7 +200,7 @@ class AlignmentHelper(object):
             # remove fnames that have been done before
             struc_fnames = [ f for f in struc_fnames if len(glob.glob(os.path.join(self.save_dir,os.path.basename(os.path.splitext(f)[0])+'*.mmap'))) == 0 ]
             print("Running motion correction across %s files "%len(struc_fnames))
-            st_slice = slice(self.struc_cfg[x]['red_ind'],None,self.struc_cfg[x]['nchan'])
+            st_slice = slice(self.struc_cfg[n]['red_ind'],None,self.struc_cfg[n]['nchan'])
             if len(struc_fnames) > 0:
                 args = [(fn, self.save_dir, self.max_shifts, self.strides, self.overlaps, self.max_deviation_rigid, self.shifts_opencv, self.border_nan, st_slice) for fn in struc_fnames]
 
@@ -218,8 +219,8 @@ class AlignmentHelper(object):
                 print("###---------------------------------------")
             out_tiffname = os.path.join(self.base_folder,"%s_struc_%s.tif"%(self.prj,n))
 
-            denoise_ds = np.zeros((self.struc_cfg[x]['nz'],self.struc_cfg[x]['shape'][1],self.struc_cfg[x]['shape'][2]),dtype=np.float32)
-            aligned_ds = np.zeros((self.struc_cfg[x]['nz'],self.struc_cfg[x]['shape'][1],self.struc_cfg[x]['shape'][2]),dtype=np.float32)
+            denoise_ds = np.zeros((self.struc_cfg[n]['nz'],self.struc_cfg[n]['shape'][0],self.struc_cfg[n]['shape'][1]),dtype=np.float32)
+            aligned_ds = np.zeros((self.struc_cfg[n]['nz'],self.struc_cfg[n]['shape'][0],self.struc_cfg[n]['shape'][1]),dtype=np.float32)
 
             # go through all the mmap files
             for f in mmap_files:
