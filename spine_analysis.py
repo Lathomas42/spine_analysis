@@ -133,8 +133,9 @@ def denoise_mov(movie,ncomp=1,batch_size=1000):
     movie2 = caiman.movie(np.reshape(np.float32(proj_frame_vectors.T), movie.shape))
     return movie2, eigenframes
 
-def motion_correct_file( fn, ind, save_dir, max_shifts, strides, overlaps, max_deviation_rigid, shifts_opencv, border_nan, subidx=slice(None,None,1), n_iter=0,max_iter=10):
+def motion_correct_file( args, n_iter=0,max_iter=10):
     try:
+        fn, ind, save_dir, max_shifts, strides, overlaps, max_deviation_rigid, shifts_opencv, border_nan, subidx,apply_subidx, apply_ofn = args
         mc = MotionCorrect(fn, dview=None, max_shifts=max_shifts,
                       strides=strides, overlaps=overlaps,
                       max_deviation_rigid=max_deviation_rigid,
@@ -142,11 +143,14 @@ def motion_correct_file( fn, ind, save_dir, max_shifts, strides, overlaps, max_d
                       splits_els=1,splits_rig=1,
                       border_nan=border_nan, subidx=subidx, save_dir=save_dir)
         mc.motion_correct(save_movie=False)
+        if apply_subidx is not None:
+            applied_mov = mc.apply_shifts_movie(fn,apply_subidx)
+            applied_mov.save(apply_ofn)
         return (ind, np.mean(mc.templates_rig,axis=0))
     except Exception as e:
         if n_iter < max_iter:
             print("Retrying %s due to %s"%(fn, e))
-            return motion_correct_file(fn, save_dir, max_shifts, strides, overlaps, max_deviation_rigid, shifts_opencv, border_nan, n_iter+1)
+            return motion_correct_file(args, n_iter=n_iter+1)
         else:
             return Exception("Failed max_iter: %s times"%max_iter)
 
@@ -214,10 +218,10 @@ class AlignmentHelper(object):
             if len(struc_fnames) > 0:
                 args = [(fn,  ind,
                           self.save_dir, self.max_shifts, self.strides, self.overlaps, 
-                          self.max_deviation_rigid, self.shifts_opencv, self.border_nan, st_slice) for ind,fn in struc_fnames]
+                          self.max_deviation_rigid, self.shifts_opencv, self.border_nan, st_slice, None,None) for ind,fn in struc_fnames]
 
                 pool = multiprocessing.Pool(min(self.num_proc,len(struc_fnames)))
-                rets = pool.starmap(motion_correct_file,args)
+                rets = pool.imap_unordered(motion_correct_file,args)
 
             out_tiffname = os.path.join(self.base_folder,"%s_struc_%s.tif"%(self.prj,n))
 
@@ -262,30 +266,25 @@ class AlignmentHelper(object):
             n_files_per_set = round(100 / self.cfgs[n]['frames'])
             fname_sets = [ self.fnames[n][i:i+n_files_per_set] 
                             for i in range(0,len(self.fnames[n]),n_files_per_set)]
-            for inds_fnames in fname_sets:
-                #unzip inds and fnames
-                inds, fnames = list(zip(*inds_fnames))
-                # go through each plane and motion correct the red channel
-                for p in range(self.cfgs[n]['nz']):
-                    sliceRed = slice(self.cfgs[n]['nchan']*p+self.cfgs[n]['red_ind'],None,self.cfgs[n]['nchan']*self.cfgs[n]['nz'])
-                    sliceGreen = slice(self.cfgs[n]['nchan']*p+self.cfgs[n]['green_ind'],None,self.cfgs[n]['nchan']*self.cfgs[n]['nz'])
 
-                    # motion correct on the red channel
-                    mc = MotionCorrect(fnames, dview=None,max_shifts=self.max_shifts, strides=self.strides, overlaps=self.overlaps, 
-                        max_deviation_rigid=self.max_deviation_rigid, shifts_opencv=self.shifts_opencv, nonneg_movie=True, border_nan=self.border_nan,subidx=sliceRed)
-                    ret = mc.motion_correct(save_movie=False)
+            for p in range(self.cfgs[n]['nz']):
+                print("Processing functional data on plane %s" %p)
 
-                    # save the mean image of the red channel after correction
-                    out_tiffname = os.path.join(self.base_folder,"%s_func_%s_p%s_%s_%s.tif"%(self.prj,n,p,min(inds),max(inds)))
-                    tf.imsave(out_tiffname, np.mean(mc.templates_rig,axis=0))
+                sliceRed = slice(self.cfgs[n]['nchan']*p+self.cfgs[n]['red_ind'],None,self.cfgs[n]['nchan']*self.cfgs[n]['nz'])
+                sliceGreen = slice(self.cfgs[n]['nchan']*p+self.cfgs[n]['green_ind'],None,self.cfgs[n]['nchan']*self.cfgs[n]['nz'])
+                
+                args = []
+                for inds_fnames in fname_sets:
+                    inds, fnames = list(zip(*inds_fnames))
+                    green_ofn = os.path.join(self.base_folder,"%s_func_mov_%s_p%s_%s_%s.tif"%(self.prj,n,p,min(inds),max(inds)))
+                    args.append((fnames,(p,inds), self.save_dir, self.max_shifts, self.strides, self.overlaps, 
+                          self.max_deviation_rigid, self.shifts_opencv, self.border_nan, sliceRed, sliceGreen, green_ofn))
+                pool = multiprocessing.Pool(min(self.num_proc,len(args)))
+                rets = pool.imap_unordered(motion_correct_file,args)
 
-                    # apply shifts to the green channel
-                    mmgreen = ret.apply_shifts_movie(fnames,sliceGreen)
-
-                    # save the green channel movie to the zarr
-                    out_tiffname = os.path.join(self.base_folder,"%s_func_mov_%s_p%s_%s_%s.tif"%(self.prj,n,p,min(inds),max(inds)))
-
-                    mmgreen.save(out_tiffname)
+                for (inds, template) in rets:
+                    red_ofn = os.path.join(self.base_folder,"%s_func_red_%s_p%s_%s_%s.tif"%(self.prj,n,p,min(inds),max(inds)))
+                    tf.imsave(red_ofn, template)
 
     def align_func_to_struc(self):
                 # now go through the avg red channels and find where they are in the larger volume
