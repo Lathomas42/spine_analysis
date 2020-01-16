@@ -92,11 +92,18 @@ class MetadataParser(object):
             ind = int(ci)-1
             if colors[ind][1:-1] == channel:
                 return ind
+
     def get_num_slices(self):
-        return int(self._get_var('SI.hStackManager.numSlices'))
+        if bool(self._get_var('SI.hFastZ.hasFastZ')):
+            return int(self._get_var('SI.hFastZ.numFramesPerVolume'))
+        else:
+            return int(self._get_var('SI.hStackManager.numSlices'))
 
     def get_frames_per_slice(self):
-        return int(self._get_var('SI.hStackManager.framesPerSlice'))
+        if bool(self._get_var('SI.hFastZ.hasFastZ')):
+            return int(self._get_var('SI.hFastZ.numVolumes'))
+        else:
+            return int(self._get_var('SI.hStackManager.framesPerSlice'))
 
     def get_pixelsize(self):
         return (int(self._get_var('SI.hRoiManager.linesPerFrame')),
