@@ -168,9 +168,6 @@ class AlignmentHelper(object):
         self.num_proc=cfg["num_proc"]
         self.prj_dir = os.path.join(self.server_dir, self.prj)
 
-        self.struc_fnames = { x: glob.glob(os.path.join(self.prj_dir, "%s*_%s/*.tif"%(self.prj,x))) for x in self.struct_nums }
-        self.func_fnames = { x: glob.glob(os.path.join(self.prj_dir, "%s*_%s/*.tif"%(self.prj,x))) for x in self.func_nums }
-
         self.base_folder = os.path.join(cfg['output_dir'],self.prj)
         self.save_dir=os.path.join(self.base_folder,"struct_mmaps/")
 
@@ -181,7 +178,8 @@ class AlignmentHelper(object):
         self.struc_cfg = dict()
         for x in self.struct_nums:
             self.struc_cfg[x] = dict()
-            struct_metadata = MetadataParser(self.struc_fnames[x][0])
+            self.struc_cfg[x]['fnames'] = glob.glob(os.path.join(self.prj_dir, "%s*_%s/*.tif"%(self.prj,x)))
+            struct_metadata = MetadataParser(self.struc_cfg[x]['fnames'][0])
             self.struc_cfg[x]['red_ind'] = struct_metadata.get_channel_index('red')
             self.struc_cfg[x]['nchan'] = struct_metadata.get_nchannels()
             self.struc_cfg[x]['nz'] = struct_metadata.get_num_slices()
@@ -189,16 +187,27 @@ class AlignmentHelper(object):
             self.struc_cfg[x]['shape'] = struct_metadata.get_pixelsize()
             self.struc_cfg[x]['zoom'] = struct_metadata.get_zoom()
 
+        # get metadata
+        self.func_cfg = dict()
+        for x in self.func_nums:
+            self.func_cfg[x] = dict()
+            self.func_cfg[x]['fnames'] = glob.glob(os.path.join(self.prj_dir, "%s*_%s/*.tif"%(self.prj,x)))
+            struct_metadata = MetadataParser(self.func_cfg[x]['fnames'][0])
+            self.func_cfg[x]['red_ind'] = struct_metadata.get_channel_index('red')
+            self.func_cfg[x]['nchan'] = struct_metadata.get_nchannels()
+            self.func_cfg[x]['nz'] = struct_metadata.get_num_slices()
+            self.func_cfg[x]['frames'] = struct_metadata.get_frames_per_slice()
+            self.func_cfg[x]['shape'] = struct_metadata.get_pixelsize()
+            self.func_cfg[x]['zoom'] = struct_metadata.get_zoom()
+
 
     def align_structural_data(self):
         # example usage:
         # iter through all struc files
-        for n in self.struc_fnames:
-            struc_fnames = self.struc_fnames[n]
+        for n in self.struct_nums:
+            struc_fnames = self.func_cfg[n]['fnames']
             print("Processing structural dataset %s" % n)
-            print(os.path.join(self.save_dir,os.path.basename(os.path.splitext(struc_fnames[10])[0])+'.mmap'))
             # remove fnames that have been done before
-            struc_fnames = [ f for f in struc_fnames if len(glob.glob(os.path.join(self.save_dir,os.path.basename(os.path.splitext(f)[0])+'*.mmap'))) == 0 ]
             print("Running motion correction across %s files "%len(struc_fnames))
             st_slice = slice(self.struc_cfg[n]['red_ind'],None,self.struc_cfg[n]['nchan'])
             rets = []
@@ -306,8 +315,16 @@ class AlignmentHelper(object):
             print(reader.metadata())
 
 
-            # In[ ]:
 
+            # OUTLINE
+            # 1. split func files into groups of ~30
+            # for each group of 30:
+            #   2. motion correct the red channel of those files
+            #   3. save the mean of the red channel to a tif
+            #   4. apply the shifts to the green channel
+            #   5. save the green channel movie
+            #   6. find red channel in structural stack
+            #   7. save shift information
 
             #%% start the cluster (if a cluster already exists terminate it)
             if 'dview' in locals():
