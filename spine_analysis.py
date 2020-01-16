@@ -125,7 +125,7 @@ def denoise_mov(movie,ncomp=1,batch_size=1000):
     movie2 = caiman.movie(np.reshape(np.float32(proj_frame_vectors.T), movie.shape))
     return movie2, eigenframes
 
-def motion_correct_file( fn, save_dir, max_shifts, strides, overlaps, max_deviation_rigid, shifts_opencv, border_nan, subidx=slice(None,None,1), n_iter=0,max_iter=10):
+def motion_correct_file( fn, ind, save_dir, max_shifts, strides, overlaps, max_deviation_rigid, shifts_opencv, border_nan, subidx=slice(None,None,1), n_iter=0,max_iter=10):
     try:
         mc = MotionCorrect(fn, dview=None, max_shifts=max_shifts,
                       strides=strides, overlaps=overlaps,
@@ -133,8 +133,8 @@ def motion_correct_file( fn, save_dir, max_shifts, strides, overlaps, max_deviat
                       shifts_opencv=shifts_opencv, nonneg_movie=True,
                       splits_els=1,splits_rig=1,
                       border_nan=border_nan, subidx=subidx, save_dir=save_dir)
-        mc.motion_correct(save_movie=True)
-        return mc.mmap_file
+        mc.motion_correct(save_movie=False)
+        return (ind, np.mean(mc.templates_rig,axis=0))
     except Exception as e:
         if n_iter < max_iter:
             print("Retrying %s due to %s"%(fn, e))
@@ -201,38 +201,23 @@ class AlignmentHelper(object):
             struc_fnames = [ f for f in struc_fnames if len(glob.glob(os.path.join(self.save_dir,os.path.basename(os.path.splitext(f)[0])+'*.mmap'))) == 0 ]
             print("Running motion correction across %s files "%len(struc_fnames))
             st_slice = slice(self.struc_cfg[n]['red_ind'],None,self.struc_cfg[n]['nchan'])
+            rets = []
             if len(struc_fnames) > 0:
-                args = [(fn, self.save_dir, self.max_shifts, self.strides, self.overlaps, self.max_deviation_rigid, self.shifts_opencv, self.border_nan, st_slice) for fn in struc_fnames]
+                args = [(fn,  int(fn.split('/')[-1].split('_')[5].split('.')[0]) - 1,
+                          self.save_dir, self.max_shifts, self.strides, self.overlaps, 
+                          self.max_deviation_rigid, self.shifts_opencv, self.border_nan, st_slice) for fn in struc_fnames]
 
                 pool = multiprocessing.Pool(min(self.num_proc,len(struc_fnames)))
-                pool.starmap(motion_correct_file,args)
+                rets = pool.starmap(motion_correct_file,args)
 
-            # take median filters of the newly aligned stacks and register them
-            mmap_files = glob.glob(os.path.join(self.save_dir,"*.mmap"))
-            mmap_inds = [ int(f.split('/')[-1].split('_')[5]) - 1 for f in mmap_files ]
-
-            # check if any inds missing and report it
-            missing = [ x for x in range(max(mmap_inds)+1) if x not in mmap_inds ]
-            if len(missing) > 0:
-                print("###---------------------------------------")
-                print("WARNING: Missing ",missing)
-                print("###---------------------------------------")
             out_tiffname = os.path.join(self.base_folder,"%s_struc_%s.tif"%(self.prj,n))
 
             denoise_ds = np.zeros((self.struc_cfg[n]['nz'],self.struc_cfg[n]['shape'][0],self.struc_cfg[n]['shape'][1]),dtype=np.float32)
             aligned_ds = np.zeros((self.struc_cfg[n]['nz'],self.struc_cfg[n]['shape'][0],self.struc_cfg[n]['shape'][1]),dtype=np.float32)
 
             # go through all the mmap files
-            for f in mmap_files:
-                if f is list:
-                    f = f[0]
-                ind = int(f.split('/')[-1].split('_')[5]) - 1
-                ds = caiman.load(f)
-                dnm, _ = denoise_mov(ds,1,1000)
-                denoise_ds[ind,:,:] = dnm.mean(axis=0)
-
-                # remove the file
-                os.remove(f)
+            for (ind, template) in rets:
+                denoise_ds[ind,:,:] = template
 
             # save the denoised dataset
             #print("saving denoised data to %s"%out_tiffname)
@@ -241,7 +226,7 @@ class AlignmentHelper(object):
             #align the denoised items to eachother
             aligned_ds[0,:,:] = denoise_ds[0,:,:]
             for i in range(1,len(aligned_ds)):
-                s,e,d = skimage.feature.register_translation(aligned_ds[i-1,:,:],denoise_ds[i,:,:],100)
+                s,_,_ = skimage.feature.register_translation(aligned_ds[i-1,:,:],denoise_ds[i,:,:],100)
                 print(s)
                 oi = scipy.ndimage.fourier_shift(np.fft.fftn(denoise_ds[i,:,:]),s)
                 aligned_ds[i,:,:] = np.fft.ifftn(oi)
