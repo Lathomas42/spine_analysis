@@ -94,7 +94,7 @@ class MetadataParser(object):
                 return ind
 
     def get_num_slices(self):
-        if self._get_var('SI.hFastZ.hasFastZ').lower() == 'true:
+        if self._get_var('SI.hFastZ.hasFastZ').lower() == 'true':
             return int(self._get_var('SI.hFastZ.numFramesPerVolume'))
         else:
             return int(self._get_var('SI.hStackManager.numSlices'))
