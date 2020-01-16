@@ -70,12 +70,40 @@ default_config = {
     "prj": "20191209",
     "struct_nums":[2], #list of all _# for structural data
     "func_nums":[1], #list of all _# for functional data
-    # functional data
-    "nchannels" : 2,
-    "nplanes" : 4,
-    "nimgs" : 27,
-    "num_proc": 16
 }
+
+class MetadataParser(object):
+    def __init__(self, file):
+        with ScanImageTiffReader(file) as reader:
+            mds = reader.metadata()
+            self.metadata = configparser.ConfigParser()
+            self.metadata.read_string('[SIvars]\n'+mds[:self.metadata.find('\n\n')])
+            self.jsdata = json.loads(mds[self.metadata.find('\n\n'):])
+
+    def _get_var(self, varname):
+        return self.metadata['SIvars'][varname]
+
+    def get_nchannels(self):
+        return self._get_var('SI.hChannels.channelSave').count(';')+1
+
+    def get_channel_index(self,channel='red'):
+        colors = self._get_var('SI.hChannels.channelMergeColor')[1:-1].split(';')
+        for e,ci in enumerate(self._get_var('SI.hChannels.channelSave')[1:-1].split(';')):
+            ind = int(ci)-1
+            if colors[ind][1:-1] == channel:
+                return ind
+    def get_num_slices(self):
+        return int(self._get_var('SI.hStackManager.numSlices'))
+
+    def get_frames_per_slice(self):
+        return int(self._get_var('SI.hStackManager.framesPerSlice'))
+
+    def get_pixelsize(self):
+        return (int(self._get_var('SI.hRoiManager.linesPerFrame')),
+                int(self._get_var('SI.hRoiManager.pixelsPerLine')))
+
+    def get_zoom(self):
+        return float(self._get_var('SI.hRoiManager.scanZoomFactor'))
 
 def create_config(path):
     with open(path,'w') as outfile:
@@ -149,8 +177,16 @@ class AlignmentHelper(object):
         if not os.path.isdir(self.save_dir):
             os.makedirs(self.save_dir)
 
-        print("loading test movie")
-        self.testm = caiman.load([self.struc_fnames[self.struct_nums[0]][0]])
+        # get metadata
+        self.struc_cfg = {}
+        for x in self.struct_nums:
+            struct_metadata = MetadataParser(self.struc_fnames[x][0])
+            self.struc_cfg[x]['red_ind'] = struct_metadata.get_channel_index('red')
+            self.struc_cfg[x]['nchan'] = struct_metadata.get_nchannels()
+            self.struc_cfg[x]['nz'] = struct_metadata.get_num_slices()
+            self.struc_cfg[x]['frames'] = struct_metadata.get_frames_per_slice()
+            self.struc_cfg[x]['shape'] = struct_metadata.get_pixelsize()
+            self.struc_cfg[x]['zoom'] = struct_metadata.get_zoom()
 
 
     def align_structural_data(self):
@@ -181,8 +217,8 @@ class AlignmentHelper(object):
                 print("###---------------------------------------")
             out_tiffname = os.path.join(self.base_folder,"%s_struc_%s.tif"%(self.prj,n))
 
-            denoise_ds = np.zeros((max(mmap_inds)+1,self.testm.shape[1],self.testm.shape[2]),dtype=self.testm.dtype)
-            aligned_ds = np.zeros((max(mmap_inds)+1,self.testm.shape[1],self.testm.shape[2]),dtype=self.testm.dtype)
+            denoise_ds = np.zeros((self.struc_cfg[x]['nz'],self.struc_cfg[x]['shape'][1],self.struc_cfg[x]['shape'][2]),dtype=np.float32)
+            aligned_ds = np.zeros((self.struc_cfg[x]['nz'],self.struc_cfg[x]['shape'][1],self.struc_cfg[x]['shape'][2]),dtype=np.float32)
 
             # go through all the mmap files
             for f in mmap_files:
@@ -380,4 +416,3 @@ if __name__ == '__main__':
 
     if args.struct:
         align_obj.align_structural_data()
-
