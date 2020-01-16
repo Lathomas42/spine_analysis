@@ -92,6 +92,7 @@ class MetadataParser(object):
             ind = int(ci)-1
             if colors[ind][1:-1] == channel:
                 return ind
+        return -1
 
     def get_num_slices(self):
         if self._get_var('SI.hFastZ.enable').lower() == 'true':
@@ -168,10 +169,6 @@ class AlignmentHelper(object):
         self.prj = cfg["prj"]
         self.struct_nums = cfg["struct_nums"]
         self.func_nums = cfg["func_nums"]
-        # functional data
-        self.nchannels = cfg["nchannels"]
-        self.nplanes = cfg["nplanes"]
-        self.nimgs = cfg["nimgs"]
         self.num_proc=cfg["num_proc"]
         self.prj_dir = os.path.join(self.server_dir, self.prj)
 
@@ -181,55 +178,51 @@ class AlignmentHelper(object):
         if not os.path.isdir(self.save_dir):
             os.makedirs(self.save_dir)
 
+        self.fnames = dict()
         # get metadata
-        self.struc_cfg = dict()
-        for x in self.struct_nums:
-            self.struc_cfg[x] = dict()
-            self.struc_cfg[x]['fnames'] = glob.glob(os.path.join(self.prj_dir, "%s*_%s/*.tif"%(self.prj,x)))
-            struct_metadata = MetadataParser(self.struc_cfg[x]['fnames'][0])
-            self.struc_cfg[x]['red_ind'] = struct_metadata.get_channel_index('red')
-            self.struc_cfg[x]['nchan'] = struct_metadata.get_nchannels()
-            self.struc_cfg[x]['nz'] = struct_metadata.get_num_slices()
-            self.struc_cfg[x]['frames'] = struct_metadata.get_frames_per_slice()
-            self.struc_cfg[x]['shape'] = struct_metadata.get_pixelsize()
-            self.struc_cfg[x]['zoom'] = struct_metadata.get_zoom()
-
-        # get metadata
-        self.func_cfg = dict()
-        for x in self.func_nums:
-            self.func_cfg[x] = dict()
-            self.func_cfg[x]['fnames'] = glob.glob(os.path.join(self.prj_dir, "%s*_%s/*.tif"%(self.prj,x)))
-            struct_metadata = MetadataParser(self.func_cfg[x]['fnames'][0])
-            self.func_cfg[x]['red_ind'] = struct_metadata.get_channel_index('red')
-            self.func_cfg[x]['nchan'] = struct_metadata.get_nchannels()
-            self.func_cfg[x]['nz'] = struct_metadata.get_num_slices()
-            self.func_cfg[x]['frames'] = struct_metadata.get_frames_per_slice()
-            self.func_cfg[x]['shape'] = struct_metadata.get_pixelsize()
-            self.func_cfg[x]['zoom'] = struct_metadata.get_zoom()
+        self.cfgs = dict()
+        for x in self.struct_nums + self.func_nums:
+            self.cfgs[x] = dict()
+            fns = glob.glob(os.path.join(self.prj_dir, "%s*_%s/*.tif"%(self.prj,x)))
+            fns.sort()
+            com_pre = os.path.commonprefix(fns)
+            rev_fns = [f[::-1] for f in fns]
+            com_suff = os.path.commonprefix(rev_fns)[::-1]
+            inds = [ int(s[len(com_pre):-len(com_suff)]) for s in fns ]
+            self.fnames[x] = list(zip(inds,fns))
+            struct_metadata = MetadataParser(self.fnames[x][0])
+            self.cfgs[x]['type'] = 'struct' if x in self.struct_nums else 'func'
+            self.cfgs[x]['red_ind'] = struct_metadata.get_channel_index('red')
+            self.cfgs[x]['green_ind'] = struct_metadata.get_channel_index('green')
+            self.cfgs[x]['nchan'] = struct_metadata.get_nchannels()
+            self.cfgs[x]['nz'] = struct_metadata.get_num_slices()
+            self.cfgs[x]['frames'] = struct_metadata.get_frames_per_slice()
+            self.cfgs[x]['shape'] = struct_metadata.get_pixelsize()
+            self.cfgs[x]['zoom'] = struct_metadata.get_zoom()
 
 
     def align_structural_data(self):
         # example usage:
         # iter through all struc files
         for n in self.struct_nums:
-            struc_fnames = self.func_cfg[n]['fnames']
+            struc_fnames = self.fnames[n]
             print("Processing structural dataset %s" % n)
             # remove fnames that have been done before
             print("Running motion correction across %s files "%len(struc_fnames))
-            st_slice = slice(self.struc_cfg[n]['red_ind'],None,self.struc_cfg[n]['nchan'])
+            st_slice = slice(self.cfgs[n]['red_ind'],None,self.cfgs[n]['nchan'])
             rets = []
             if len(struc_fnames) > 0:
-                args = [(fn,  int(fn.split('/')[-1].split('_')[5].split('.')[0]) - 1,
+                args = [(fn,  ind,
                           self.save_dir, self.max_shifts, self.strides, self.overlaps, 
-                          self.max_deviation_rigid, self.shifts_opencv, self.border_nan, st_slice) for fn in struc_fnames]
+                          self.max_deviation_rigid, self.shifts_opencv, self.border_nan, st_slice) for ind,fn in struc_fnames]
 
                 pool = multiprocessing.Pool(min(self.num_proc,len(struc_fnames)))
                 rets = pool.starmap(motion_correct_file,args)
 
             out_tiffname = os.path.join(self.base_folder,"%s_struc_%s.tif"%(self.prj,n))
 
-            denoise_ds = np.zeros((self.struc_cfg[n]['nz'],self.struc_cfg[n]['shape'][0],self.struc_cfg[n]['shape'][1]),dtype=np.float32)
-            aligned_ds = np.zeros((self.struc_cfg[n]['nz'],self.struc_cfg[n]['shape'][0],self.struc_cfg[n]['shape'][1]),dtype=np.float32)
+            denoise_ds = np.zeros((self.cfgs[n]['nz'],self.cfgs[n]['shape'][0],self.cfgs[n]['shape'][1]),dtype=np.float32)
+            aligned_ds = np.zeros((self.cfgs[n]['nz'],self.cfgs[n]['shape'][0],self.cfgs[n]['shape'][1]),dtype=np.float32)
 
             # go through all the mmap files
             for (ind, template) in rets:
@@ -256,160 +249,76 @@ class AlignmentHelper(object):
             # first go through and save a file for each plane and each channel
 
             #%%  TEST CODE: start the cluster (if a cluster already exists terminate it)
-            if self.dview is not None:
-                caiman.stop_server(dview=self.dview)
-                self.dview = None
-            c, self.dview, n_processes = caiman.cluster.setup_cluster(
-                backend='local', n_processes=None, single_thread=False)
+            #if self.dview is not None:
+            #    caiman.stop_server(dview=self.dview)
+            #    self.dview = None
+            #c, self.dview, n_processes = caiman.cluster.setup_cluster(
+            #    backend='local', n_processes=None, single_thread=False)
 
-            for c in range(nchannels):
-                for p in range(nplanes):
-                    basedir=os.path.join(base_folder,str(c),str(p))
-                    if not os.path.isdir(basedir):
-                        os.makedirs(basedir)
+            # for each functional imaging session
+            for n in self.func_nums:
+                # for each set of functional files
+                # keep them around 100 frames per set
+                n_files_per_set = round(100 / self.cfgs[n]['frames'])
+                fname_sets = [ self.fnames[n][i:i+n_files_per_set] 
+                               for i in range(0,len(self.fnames[n]),n_files_per_set)]
+                for inds_fnames in fname_sets:
+                    #unzip inds and fnames
+                    inds, fnames = list(zip(*inds_fnames))
+                    # go through each plane and motion correct the red channel
+                    for p in range(self.cfgs[n]['nz']):
+                        sliceRed = slice(self.cfgs[n]['nchan']*p+self.cfgs[n]['red_ind'],None,self.cfgs[n]['nchan']*self.cfgs[n]['nz'])
+                        sliceGreen = slice(self.cfgs[n]['nchan']*p+self.cfgs[n]['green_ind'],None,self.cfgs[n]['nchan']*self.cfgs[n]['nz'])
 
-            def process_func(fn):
-                nTries = 10
-                vol=None
-                while nTries > 0:
-                    try:
-                        reader = ScanImageTiffReader(fn)
-                        vol = reader.data()
-                        reader.close()
-                        nTries -= 1
-                    except:
-                        print("retrying %s"%fn)
+                        # motion correct on the red channel
+                        mc = MotionCorrect(fnames, dview=None,max_shifts=self.max_shifts, strides=self.strides, overlaps=self.overlaps, 
+                          max_deviation_rigid=self.max_deviation_rigid, shifts_opencv=self.shifts_opencv, nonneg_movie=True, border_nan=self.border_nan,subidx=sliceRed)
+                        ret = mc.motion_correct(save_movie=False)
 
-                for c in range(nchannels):
-                    for p in range(nplanes):
-                        basedir=os.path.join(base_folder,str(c),str(p))
-                        tif.imsave(os.path.join(basedir,os.path.basename(fn)),vol[(p*2+c)::8,:,:],bigtiff=True)
+                        # save the mean image of the red channel after correction
+                        out_tiffname = os.path.join(self.base_folder,"%s_func_%s_p%s_%s_%s.tif"%(self.prj,n,p,min(inds),max(inds)))
+                        tf.imsave(out_tiffname, np.mean(mc.templates_rig,axis=0))
 
-            pool = multiprocessing.Pool(4)
-            #i = 0
-            #for fn in func_fnames:
-            #    print(i/len(func_fnames)*100)
-            #    process_func(fn)
-            list(tqdm.tqdm(pool.imap(process_func,func_fnames),total=len(func_fnames)))
+                        # apply shifts to the green channel
+                        mmgreen = ret.apply_shifts_movie(fnames,sliceGreen)
 
+                        # save the green channel movie to the zarr
+                        out_tiffname = os.path.join(self.base_folder,"%s_func_mov_%s_p%s_%s_%s.tif"%(self.prj,n,p,min(inds),max(inds)))
 
-            # In[ ]:
+                        mmgreen.save(out_tiffname)
 
+        def align_func_to_struc(self):
+                    # now go through the avg red channels and find where they are in the larger volume
+                    out_zarr = zarr.open(os.path.join(base_folder,"%s.zarr"%prj),'a')
+                    #out_zarr.require_dataset('func_red_shifts',shape=(nplanes,2),dtype=np.float)
 
-            # now go through and make one master channel for each channel on each plane
-            for c in range(nchannels):
-                for p in range(nplanes):
-                    basedir=os.path.join(base_folder,str(c),str(p))
-                    fns = glob.glob(os.path.join(basedir,"%s_*_*_*_*.tif"%prj))
-                    fns.sort()
-                    ofn = os.path.join(base_folder,"%s_c%s_p%s.tif"%(prj,c,p))
-                    m = caiman.load_movie_chain(fns)
-                    m.save(ofn)
+                    rettot = []
+                    for p in range(4):
+                        rets = []
 
-
-            # In[ ]:
-
-
-            func_fnames
-            reader = ScanImageTiffReader(struc_fnames[2])
-            print(reader.metadata())
-
-
-            # In[ ]:
+                        func_red =  cv2.medianBlur(out_zarr['func_red_avg'][p,:,:],3)
+                        func_red = (func_red - func_red.min()) / (func_red.max()-func_red.min())
+                        func_red = skimage.transform.resize(func_red, np.asarray(func_red.shape)*7.8//9.0)
+                        for i in range(len(out_zarr['struct_aligned_2'])):
+                            struct_red = out_zarr['struct_aligned_2'][i,:,:]
+                            struct_red = (struct_red - struct_red.min()) / (struct_red.max()-struct_red.min())
+                            ret=cv2.matchTemplate((func_red*255.0).astype(np.uint8), (struct_red*255.0).astype(np.uint8), cv2.TM_SQDIFF_NORMED)
+                            rets.append(cv2.minMaxLoc(ret))
+                        rettot.append(rets)
 
 
-            reader = ScanImageTiffReader(func_fnames[2])
-            print(reader.metadata())
+                    # In[ ]:
 
 
-
-            # OUTLINE
-            # 1. split func files into groups of ~30
-            # for each group of 30:
-            #   2. motion correct the red channel of those files
-            #   3. save the mean of the red channel to a tif
-            #   4. apply the shifts to the green channel
-            #   5. save the green channel movie
-            #   6. find red channel in structural stack
-            #   7. save shift information
-
-            #%% start the cluster (if a cluster already exists terminate it)
-            if 'dview' in locals():
-                caiman.stop_server(dview=dview)
-            c, dview, n_processes = caiman.cluster.setup_cluster(
-                backend='local', n_processes=None, single_thread=False)
-
-            dummymov = caiman.load([os.path.join(base_folder,"%s_c1_p1.tif"%(prj))])
-
-            out_zarr = zarr.open(os.path.join(base_folder,"%s.zarr"%prj),'a')
-            out_zarr.require_dataset('func_red_avg',shape=(nplanes,testm.shape[1],testm.shape[2]),dtype=testm.dtype)
-            out_zarr.require_dataset('func_green_mov',shape=(nplanes,dummymov.shape[0],testm.shape[1],testm.shape[2]),dtype=testm.dtype)
-            del dummymov
-
-            mmaps = []
-            # motion correct in each of the c1 (red) channels
-            for p in range(nplanes):
-                c1fn = os.path.join(base_folder,"%s_c1_p%s.tif"%(prj,p))
-                c0fn = os.path.join(base_folder,"%s_c0_p%s.tif"%(prj,p))
-                print(c1fn)
-
-                # motion correct on the red channel
-                mc = MotionCorrect([c1fn], dview=dview, max_shifts=max_shifts,
-                                      strides=strides, overlaps=overlaps,
-                                      max_deviation_rigid=max_deviation_rigid,
-                                      shifts_opencv=shifts_opencv, nonneg_movie=True,
-                                      splits_els=30,splits_rig=30,
-                                      border_nan=border_nan)
-                ret = mc.motion_correct(save_movie=False)
-
-                # save the mean image of the red channel after correction
-                out_zarr['func_red_avg'][p,:,:] = np.mean(mc.templates_rig,axis=0)
-
-                # apply shifts to the green channel
-                mmgreen = ret.apply_shifts_movie([c0fn])
-
-                # save the green channel movie to the zarr
-                out_zarr['func_green_mov'][p,:,:,:] = mmgreen
-                del mmgreen
-                del mc
-
-            caiman.stop_server(dview=dview) # stop the server
-
-
-            # In[ ]:
-
-
-            # now go through the avg red channels and find where they are in the larger volume
-            out_zarr = zarr.open(os.path.join(base_folder,"%s.zarr"%prj),'a')
-            #out_zarr.require_dataset('func_red_shifts',shape=(nplanes,2),dtype=np.float)
-
-            rettot = []
-            for p in range(4):
-                rets = []
-
-                func_red =  cv2.medianBlur(out_zarr['func_red_avg'][p,:,:],3)
-                func_red = (func_red - func_red.min()) / (func_red.max()-func_red.min())
-                func_red = skimage.transform.resize(func_red, np.asarray(func_red.shape)*7.8//9.0)
-                for i in range(len(out_zarr['struct_aligned_2'])):
-                    struct_red = out_zarr['struct_aligned_2'][i,:,:]
-                    struct_red = (struct_red - struct_red.min()) / (struct_red.max()-struct_red.min())
-                    ret=cv2.matchTemplate((func_red*255.0).astype(np.uint8), (struct_red*255.0).astype(np.uint8), cv2.TM_SQDIFF_NORMED)
-                    rets.append(cv2.minMaxLoc(ret))
-                rettot.append(rets)
-
-
-            # In[ ]:
-
-
-            # can do some confirmation here that the planes are ~30 um apart
-            planes = np.argmin(rettot[:,:,0],axis=1)
-            out_zarr.require_dataset('func_green_planes',shape=planes.shape)
-            out_zarr['func_green_planes'] = planes
-            out_zarr.require_dataset('func_green_shifts',shape=(4,2))
-            for p in range(4):
-                # load the green data and scale it and shift it
-                out_zarr['func_green_shifts'][p,:] = rettot[p,planes[p],2]
-                #skimage.transform.resize(mmgreen,np.asarray(mmgreen.shape)*[1,7.8,7.8]//[1,9,9])
+                    # can do some confirmation here that the planes are ~30 um apart
+                    planes = np.argmin(rettot[:,:,0],axis=1)
+                    out_zarr.require_dataset('func_green_planes',shape=planes.shape)
+                    out_zarr['func_green_planes'] = planes
+                    out_zarr.require_dataset('func_green_shifts',shape=(4,2))
+                    for p in range(4):
+                        # load the green data and scale it and shift it
+                        out_zarr['func_green_shifts'][p,:] = rettot[p,planes[p],2]
+                        #skimage.transform.resize(mmgreen,np.asarray(mmgreen.shape)*[1,7.8,7.8]//[1,9,9])
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description = "Run alignment and registration of volumes using python")
@@ -427,3 +336,5 @@ if __name__ == '__main__':
 
     if args.struct:
         align_obj.align_structural_data()
+    if args.func:
+        align_obj.align_functional_data()
