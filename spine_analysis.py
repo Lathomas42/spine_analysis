@@ -244,81 +244,81 @@ class AlignmentHelper(object):
             print("saving aligned data to %s"%out_tiffname)
             tf.imsave(out_tiffname,aligned_ds)
 
-        def align_functional_data(self):
-            # now go through functional files and take the structural data
-            # first go through and save a file for each plane and each channel
+    def align_functional_data(self):
+        # now go through functional files and take the structural data
+        # first go through and save a file for each plane and each channel
 
-            #%%  TEST CODE: start the cluster (if a cluster already exists terminate it)
-            #if self.dview is not None:
-            #    caiman.stop_server(dview=self.dview)
-            #    self.dview = None
-            #c, self.dview, n_processes = caiman.cluster.setup_cluster(
-            #    backend='local', n_processes=None, single_thread=False)
+        #%%  TEST CODE: start the cluster (if a cluster already exists terminate it)
+        #if self.dview is not None:
+        #    caiman.stop_server(dview=self.dview)
+        #    self.dview = None
+        #c, self.dview, n_processes = caiman.cluster.setup_cluster(
+        #    backend='local', n_processes=None, single_thread=False)
 
-            # for each functional imaging session
-            for n in self.func_nums:
-                # for each set of functional files
-                # keep them around 100 frames per set
-                n_files_per_set = round(100 / self.cfgs[n]['frames'])
-                fname_sets = [ self.fnames[n][i:i+n_files_per_set] 
-                               for i in range(0,len(self.fnames[n]),n_files_per_set)]
-                for inds_fnames in fname_sets:
-                    #unzip inds and fnames
-                    inds, fnames = list(zip(*inds_fnames))
-                    # go through each plane and motion correct the red channel
-                    for p in range(self.cfgs[n]['nz']):
-                        sliceRed = slice(self.cfgs[n]['nchan']*p+self.cfgs[n]['red_ind'],None,self.cfgs[n]['nchan']*self.cfgs[n]['nz'])
-                        sliceGreen = slice(self.cfgs[n]['nchan']*p+self.cfgs[n]['green_ind'],None,self.cfgs[n]['nchan']*self.cfgs[n]['nz'])
+        # for each functional imaging session
+        for n in self.func_nums:
+            # for each set of functional files
+            # keep them around 100 frames per set
+            n_files_per_set = round(100 / self.cfgs[n]['frames'])
+            fname_sets = [ self.fnames[n][i:i+n_files_per_set] 
+                            for i in range(0,len(self.fnames[n]),n_files_per_set)]
+            for inds_fnames in fname_sets:
+                #unzip inds and fnames
+                inds, fnames = list(zip(*inds_fnames))
+                # go through each plane and motion correct the red channel
+                for p in range(self.cfgs[n]['nz']):
+                    sliceRed = slice(self.cfgs[n]['nchan']*p+self.cfgs[n]['red_ind'],None,self.cfgs[n]['nchan']*self.cfgs[n]['nz'])
+                    sliceGreen = slice(self.cfgs[n]['nchan']*p+self.cfgs[n]['green_ind'],None,self.cfgs[n]['nchan']*self.cfgs[n]['nz'])
 
-                        # motion correct on the red channel
-                        mc = MotionCorrect(fnames, dview=None,max_shifts=self.max_shifts, strides=self.strides, overlaps=self.overlaps, 
-                          max_deviation_rigid=self.max_deviation_rigid, shifts_opencv=self.shifts_opencv, nonneg_movie=True, border_nan=self.border_nan,subidx=sliceRed)
-                        ret = mc.motion_correct(save_movie=False)
+                    # motion correct on the red channel
+                    mc = MotionCorrect(fnames, dview=None,max_shifts=self.max_shifts, strides=self.strides, overlaps=self.overlaps, 
+                        max_deviation_rigid=self.max_deviation_rigid, shifts_opencv=self.shifts_opencv, nonneg_movie=True, border_nan=self.border_nan,subidx=sliceRed)
+                    ret = mc.motion_correct(save_movie=False)
 
-                        # save the mean image of the red channel after correction
-                        out_tiffname = os.path.join(self.base_folder,"%s_func_%s_p%s_%s_%s.tif"%(self.prj,n,p,min(inds),max(inds)))
-                        tf.imsave(out_tiffname, np.mean(mc.templates_rig,axis=0))
+                    # save the mean image of the red channel after correction
+                    out_tiffname = os.path.join(self.base_folder,"%s_func_%s_p%s_%s_%s.tif"%(self.prj,n,p,min(inds),max(inds)))
+                    tf.imsave(out_tiffname, np.mean(mc.templates_rig,axis=0))
 
-                        # apply shifts to the green channel
-                        mmgreen = ret.apply_shifts_movie(fnames,sliceGreen)
+                    # apply shifts to the green channel
+                    mmgreen = ret.apply_shifts_movie(fnames,sliceGreen)
 
-                        # save the green channel movie to the zarr
-                        out_tiffname = os.path.join(self.base_folder,"%s_func_mov_%s_p%s_%s_%s.tif"%(self.prj,n,p,min(inds),max(inds)))
+                    # save the green channel movie to the zarr
+                    out_tiffname = os.path.join(self.base_folder,"%s_func_mov_%s_p%s_%s_%s.tif"%(self.prj,n,p,min(inds),max(inds)))
 
-                        mmgreen.save(out_tiffname)
+                    mmgreen.save(out_tiffname)
 
-        def align_func_to_struc(self):
-                    # now go through the avg red channels and find where they are in the larger volume
-                    out_zarr = zarr.open(os.path.join(base_folder,"%s.zarr"%prj),'a')
-                    #out_zarr.require_dataset('func_red_shifts',shape=(nplanes,2),dtype=np.float)
+    def align_func_to_struc(self):
+                # now go through the avg red channels and find where they are in the larger volume
+                out_zarr = zarr.open(os.path.join(base_folder,"%s.zarr"%prj),'a')
+                #out_zarr.require_dataset('func_red_shifts',shape=(nplanes,2),dtype=np.float)
 
-                    rettot = []
-                    for p in range(4):
-                        rets = []
+                rettot = []
+                for p in range(4):
+                    rets = []
 
-                        func_red =  cv2.medianBlur(out_zarr['func_red_avg'][p,:,:],3)
-                        func_red = (func_red - func_red.min()) / (func_red.max()-func_red.min())
-                        func_red = skimage.transform.resize(func_red, np.asarray(func_red.shape)*7.8//9.0)
-                        for i in range(len(out_zarr['struct_aligned_2'])):
-                            struct_red = out_zarr['struct_aligned_2'][i,:,:]
-                            struct_red = (struct_red - struct_red.min()) / (struct_red.max()-struct_red.min())
-                            ret=cv2.matchTemplate((func_red*255.0).astype(np.uint8), (struct_red*255.0).astype(np.uint8), cv2.TM_SQDIFF_NORMED)
-                            rets.append(cv2.minMaxLoc(ret))
-                        rettot.append(rets)
-
-
-                    # In[ ]:
+                    func_red =  cv2.medianBlur(out_zarr['func_red_avg'][p,:,:],3)
+                    func_red = (func_red - func_red.min()) / (func_red.max()-func_red.min())
+                    func_red = skimage.transform.resize(func_red, np.asarray(func_red.shape)*7.8//9.0)
+                    for i in range(len(out_zarr['struct_aligned_2'])):
+                        struct_red = out_zarr['struct_aligned_2'][i,:,:]
+                        struct_red = (struct_red - struct_red.min()) / (struct_red.max()-struct_red.min())
+                        ret=cv2.matchTemplate((func_red*255.0).astype(np.uint8), (struct_red*255.0).astype(np.uint8), cv2.TM_SQDIFF_NORMED)
+                        rets.append(cv2.minMaxLoc(ret))
+                    rettot.append(rets)
 
 
-                    # can do some confirmation here that the planes are ~30 um apart
-                    planes = np.argmin(rettot[:,:,0],axis=1)
-                    out_zarr.require_dataset('func_green_planes',shape=planes.shape)
-                    out_zarr['func_green_planes'] = planes
-                    out_zarr.require_dataset('func_green_shifts',shape=(4,2))
-                    for p in range(4):
-                        # load the green data and scale it and shift it
-                        out_zarr['func_green_shifts'][p,:] = rettot[p,planes[p],2]
-                        #skimage.transform.resize(mmgreen,np.asarray(mmgreen.shape)*[1,7.8,7.8]//[1,9,9])
+                # In[ ]:
+
+
+                # can do some confirmation here that the planes are ~30 um apart
+                planes = np.argmin(rettot[:,:,0],axis=1)
+                out_zarr.require_dataset('func_green_planes',shape=planes.shape)
+                out_zarr['func_green_planes'] = planes
+                out_zarr.require_dataset('func_green_shifts',shape=(4,2))
+                for p in range(4):
+                    # load the green data and scale it and shift it
+                    out_zarr['func_green_shifts'][p,:] = rettot[p,planes[p],2]
+                    #skimage.transform.resize(mmgreen,np.asarray(mmgreen.shape)*[1,7.8,7.8]//[1,9,9])
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description = "Run alignment and registration of volumes using python")
