@@ -194,7 +194,7 @@ class AlignmentHelper(object):
             com_suff = os.path.commonprefix(rev_fns)[::-1]
             inds = [ int(s[len(com_pre):-len(com_suff)]) for s in fns ]
             self.fnames[x] = list(zip(inds,fns))
-            struct_metadata = MetadataParser(self.fnames[x][0])
+            struct_metadata = MetadataParser(self.fnames[x][0][1])
             self.cfgs[x]['type'] = 'struct' if x in self.struct_nums else 'func'
             self.cfgs[x]['red_ind'] = struct_metadata.get_channel_index('red')
             self.cfgs[x]['green_ind'] = struct_metadata.get_channel_index('green')
@@ -217,7 +217,7 @@ class AlignmentHelper(object):
             rets = []
             if len(struc_fnames) > 0:
                 args = [(fn,  ind,
-                          self.save_dir, self.max_shifts, self.strides, self.overlaps, 
+                          self.save_dir, self.max_shifts, self.strides, self.overlaps,
                           self.max_deviation_rigid, self.shifts_opencv, self.border_nan, st_slice, None,None) for ind,fn in struc_fnames]
 
                 pool = multiprocessing.Pool(min(self.num_proc,len(struc_fnames)))
@@ -251,20 +251,15 @@ class AlignmentHelper(object):
     def align_functional_data(self):
         # now go through functional files and take the structural data
         # first go through and save a file for each plane and each channel
-
-        #%%  TEST CODE: start the cluster (if a cluster already exists terminate it)
-        #if self.dview is not None:
-        #    caiman.stop_server(dview=self.dview)
-        #    self.dview = None
-        #c, self.dview, n_processes = caiman.cluster.setup_cluster(
-        #    backend='local', n_processes=None, single_thread=False)
-
         # for each functional imaging session
         for n in self.func_nums:
+            out_dir = os.path.join(self.base_folder,"func",str(n))
+            if not os.path.isdir(out_dir):
+                os.makedirs(out_dir)
             # for each set of functional files
             # keep them around 100 frames per set
-            n_files_per_set = round(100 / self.cfgs[n]['frames'])
-            fname_sets = [ self.fnames[n][i:i+n_files_per_set] 
+            n_files_per_set = round(400 / self.cfgs[n]['frames'])
+            fname_sets = [ self.fnames[n][i:i+n_files_per_set]
                             for i in range(0,len(self.fnames[n]),n_files_per_set)]
 
             for p in range(self.cfgs[n]['nz']):
@@ -272,18 +267,18 @@ class AlignmentHelper(object):
 
                 sliceRed = slice(self.cfgs[n]['nchan']*p+self.cfgs[n]['red_ind'],None,self.cfgs[n]['nchan']*self.cfgs[n]['nz'])
                 sliceGreen = slice(self.cfgs[n]['nchan']*p+self.cfgs[n]['green_ind'],None,self.cfgs[n]['nchan']*self.cfgs[n]['nz'])
-                
+
                 args = []
                 for inds_fnames in fname_sets:
                     inds, fnames = list(zip(*inds_fnames))
-                    green_ofn = os.path.join(self.base_folder,"%s_func_mov_%s_p%s_%s_%s.tif"%(self.prj,n,p,min(inds),max(inds)))
-                    args.append((fnames,(p,inds), self.save_dir, self.max_shifts, self.strides, self.overlaps, 
+                    green_ofn = os.path.join(out_dir,"%s_func_mov_%s_p%s_%s_%s.tif"%(self.prj,n,p,min(inds),max(inds)))
+                    args.append((list(fnames),(p,list(inds)), self.save_dir, self.max_shifts, self.strides, self.overlaps,
                           self.max_deviation_rigid, self.shifts_opencv, self.border_nan, sliceRed, sliceGreen, green_ofn))
                 pool = multiprocessing.Pool(min(self.num_proc,len(args)))
                 rets = pool.imap_unordered(motion_correct_file,args)
 
                 for (inds, template) in rets:
-                    red_ofn = os.path.join(self.base_folder,"%s_func_red_%s_p%s_%s_%s.tif"%(self.prj,n,p,min(inds),max(inds)))
+                    red_ofn = os.path.join(out_dir,"%s_func_red_%s_p%s_%s_%s.tif"%(self.prj,n,inds[0],min(inds[1]),max(inds[1])))
                     tf.imsave(red_ofn, template)
 
     def align_func_to_struc(self):
