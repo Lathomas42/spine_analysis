@@ -70,6 +70,7 @@ default_config = {
     "prj": "20191209",
     "struct_nums":[2], #list of all _# for structural data
     "func_nums":[1], #list of all _# for functional data
+    "num_proc": 4,
 }
 
 class MetadataParser(object):
@@ -223,7 +224,6 @@ class AlignmentHelper(object):
                 pool = multiprocessing.Pool(min(self.num_proc,len(struc_fnames)))
                 rets = pool.imap_unordered(motion_correct_file,args)
 
-            out_tiffname = os.path.join(self.base_folder,"%s_struc_%s.tif"%(self.prj,n))
 
             denoise_ds = np.zeros((self.cfgs[n]['nz'],self.cfgs[n]['shape'][0],self.cfgs[n]['shape'][1]),dtype=np.float32)
             aligned_ds = np.zeros((self.cfgs[n]['nz'],self.cfgs[n]['shape'][0],self.cfgs[n]['shape'][1]),dtype=np.float32)
@@ -231,10 +231,6 @@ class AlignmentHelper(object):
             # go through all the mmap files
             for (ind, template) in rets:
                 denoise_ds[ind,:,:] = template
-
-            # save the denoised dataset
-            #print("saving denoised data to %s"%out_tiffname)
-            #tf.imsave(out_tiffname,denoise_ds)
 
             #align the denoised items to eachother
             aligned_ds[0,:,:] = denoise_ds[0,:,:]
@@ -244,9 +240,14 @@ class AlignmentHelper(object):
                 oi = scipy.ndimage.fourier_shift(np.fft.fftn(denoise_ds[i,:,:]),s)
                 aligned_ds[i,:,:] = np.fft.ifftn(oi)
 
-            # save the aligned dataset
+            out_tiffname = os.path.join(self.base_folder,"%s_struc_%s.tif"%(self.prj,n))
+            
             print("saving aligned data to %s"%out_tiffname)
             tf.imsave(out_tiffname,aligned_ds)
+
+            out_jsname = os.path.join(self.base_folder,"%s_struc_%s.json"%(self.prj,n))
+            with open(out_jsname,'w') as out_file:
+                json.dump(self.cfgs[n],out_file)
 
     def align_functional_data(self):
         # now go through functional files and take the structural data
@@ -261,6 +262,10 @@ class AlignmentHelper(object):
             n_files_per_set = round(400 / self.cfgs[n]['frames'])
             fname_sets = [ self.fnames[n][i:i+n_files_per_set]
                             for i in range(0,len(self.fnames[n]),n_files_per_set)]
+                
+            out_jsname = os.path.join(out_dir,"%s_func_%s.json"%(self.prj,n))
+            with open(out_jsname,'w') as out_file:
+                json.dump(self.cfgs[n],out_file)
 
             for p in range(self.cfgs[n]['nz']):
                 print("Processing functional data on plane %s" %p)
@@ -276,7 +281,7 @@ class AlignmentHelper(object):
                           self.max_deviation_rigid, self.shifts_opencv, self.border_nan, sliceRed, sliceGreen, green_ofn))
                 pool = multiprocessing.Pool(min(self.num_proc,len(args)))
                 rets = pool.imap_unordered(motion_correct_file,args)
-
+                
                 for (inds, template) in rets:
                     red_ofn = os.path.join(out_dir,"%s_func_red_%s_p%s_%s_%s.tif"%(self.prj,n,inds[0],min(inds[1]),max(inds[1])))
                     tf.imsave(red_ofn, template)
@@ -332,3 +337,6 @@ if __name__ == '__main__':
         align_obj.align_structural_data()
     if args.func:
         align_obj.align_functional_data()
+
+
+# %%
