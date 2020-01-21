@@ -138,7 +138,7 @@ def motion_correct_file( args, n_iter=0,max_iter=10):
             subidx, apply_subidx, apply_ofn = args
         max_shifts, strides, overlaps, \
             max_deviation_rigid, shifts_opencv, border_nan = mc_args
-        mc = MotionCorrect(fn, dview=None, max_shifts=max_shifts,
+        mc = MotionCorrect(in_fn, dview=None, max_shifts=max_shifts,
                       strides=strides, overlaps=overlaps,
                       max_deviation_rigid=max_deviation_rigid,
                       shifts_opencv=shifts_opencv, nonneg_movie=True,
@@ -146,12 +146,12 @@ def motion_correct_file( args, n_iter=0,max_iter=10):
                       border_nan=border_nan, subidx=subidx)
         mc.motion_correct(template=template,save_movie=False)
         if apply_subidx is not None:
-            applied_mov = mc.apply_shifts_movie(fn,apply_subidx)
+            applied_mov = mc.apply_shifts_movie(in_fn,apply_subidx)
             applied_mov.save(apply_ofn)
         return (ind, np.mean(mc.templates_rig,axis=0))
     except Exception as e:
         if n_iter < max_iter:
-            print("Retrying %s due to %s"%(fn, e))
+            print("Retrying %s due to %s"%(in_fn, e))
             return motion_correct_file(args, n_iter=n_iter+1)
         else:
             return Exception("Failed max_iter: %s times"%max_iter)
@@ -174,8 +174,8 @@ class AlignmentHelper(object):
 
         self.base_folder = os.path.join(cfg['output_dir'],self.prj)
 
-        if not os.path.isdir(self.save_dir):
-            os.makedirs(self.save_dir)
+        if not os.path.isdir(self.base_folder):
+            os.makedirs(self.base_folder)
 
         self.fnames = dict()
         # get metadata
@@ -264,10 +264,6 @@ class AlignmentHelper(object):
 
                 sliceRed = slice(self.cfgs[n]['nchan']*p+self.cfgs[n]['red_ind'],None,self.cfgs[n]['nchan']*self.cfgs[n]['nz'])
                 sliceGreen = slice(self.cfgs[n]['nchan']*p+self.cfgs[n]['green_ind'],None,self.cfgs[n]['nchan']*self.cfgs[n]['nz'])
-
-                # first process the first set of the functional movies to get a template
-                first_args = args.pop(0)
-                i,template = motion_correct_file(first_args)
 
                 args = []
                 template = None
