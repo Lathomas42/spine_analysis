@@ -59,9 +59,7 @@ default_config = {
     "max_shifts": (10, 10),  # maximum allowed rigid shift in pixels (view the movie to get a sense of motion)
     "strides":  (48, 48),  # create a new patch every x pixels for pw-rigid correction
     "overlaps": (24, 24),  # overlap between pathes (size of patch strides+overlaps)
-    "num_frames_split": 100,  # length in frames of each chunk of the movie (to be processed in parallel)
     "max_deviation_rigid": 3 ,  # maximum deviation allowed for patch with respect to rigid shifts
-    "pw_rigid": False,  # flag for performing rigid or piecewise rigid motion correction
     "shifts_opencv": True,  # flag for correcting motion using bicubic interpolation (otherwise FFT interpolation is used)
     "border_nan": 'copy',  # replicate values along the boundary (if True, fill in with NaN)
     # first do the structural data in the _2 folder
@@ -136,14 +134,17 @@ def denoise_mov(movie,ncomp=1,batch_size=1000):
 
 def motion_correct_file( args, n_iter=0,max_iter=10):
     try:
-        fn, ind, save_dir, max_shifts, strides, overlaps, max_deviation_rigid, shifts_opencv, border_nan, subidx,apply_subidx, apply_ofn = args
+        in_fn, file_index, template, mc_args, \
+            subidx, apply_subidx, apply_ofn = args
+        max_shifts, strides, overlaps, \
+            max_deviation_rigid, shifts_opencv, border_nan = mc_args
         mc = MotionCorrect(fn, dview=None, max_shifts=max_shifts,
                       strides=strides, overlaps=overlaps,
                       max_deviation_rigid=max_deviation_rigid,
                       shifts_opencv=shifts_opencv, nonneg_movie=True,
                       splits_els=1,splits_rig=1,
-                      border_nan=border_nan, subidx=subidx, save_dir=save_dir)
-        mc.motion_correct(save_movie=False)
+                      border_nan=border_nan, subidx=subidx)
+        mc.motion_correct(template=template,save_movie=False)
         if apply_subidx is not None:
             applied_mov = mc.apply_shifts_movie(fn,apply_subidx)
             applied_mov.save(apply_ofn)
@@ -162,14 +163,8 @@ class AlignmentHelper(object):
             cfg = json.load(open(cfg,'r'))
 
         self.dview = None
-        self.max_shifts = cfg["max_shifts"]
-        self.strides = cfg["strides"]
-        self.overlaps = cfg["overlaps"]
-        self.num_frames_split = cfg["num_frames_split"]
-        self.max_deviation_rigid = cfg["max_deviation_rigid"]
-        self.pw_rigid = cfg["pw_rigid"]
-        self.shifts_opencv = cfg["shifts_opencv"]
-        self.border_nan = cfg["border_nan"]
+        self.mc_args = [ cfg["max_shifts"], cfg["strides"], cfg["overlaps"],
+                        cfg["max_deviation_rigid"],  cfg["shifts_opencv"], cfg["border_nan"]]
         self.server_dir = cfg["server_dir"]
         self.prj = cfg["prj"]
         self.struct_nums = cfg["struct_nums"]
@@ -178,7 +173,6 @@ class AlignmentHelper(object):
         self.prj_dir = os.path.join(self.server_dir, self.prj)
 
         self.base_folder = os.path.join(cfg['output_dir'],self.prj)
-        self.save_dir=os.path.join(self.base_folder,"struct_mmaps/")
 
         if not os.path.isdir(self.save_dir):
             os.makedirs(self.save_dir)
@@ -217,9 +211,7 @@ class AlignmentHelper(object):
             st_slice = slice(self.cfgs[n]['red_ind'],None,self.cfgs[n]['nchan'])
             rets = []
             if len(struc_fnames) > 0:
-                args = [(fn,  ind,
-                          self.save_dir, self.max_shifts, self.strides, self.overlaps,
-                          self.max_deviation_rigid, self.shifts_opencv, self.border_nan, st_slice, None,None) for ind,fn in struc_fnames]
+                args = [(fn,  ind, None, self.mc_args, st_slice, None,None) for ind,fn in struc_fnames]
 
                 pool = multiprocessing.Pool(min(self.num_proc,len(struc_fnames)))
                 rets = pool.imap_unordered(motion_correct_file,args)
@@ -241,7 +233,7 @@ class AlignmentHelper(object):
                 aligned_ds[i,:,:] = np.fft.ifftn(oi)
 
             out_tiffname = os.path.join(self.base_folder,"%s_struc_%s.tif"%(self.prj,n))
-            
+
             print("saving aligned data to %s"%out_tiffname)
             tf.imsave(out_tiffname,aligned_ds)
 
@@ -262,7 +254,7 @@ class AlignmentHelper(object):
             n_files_per_set = round(400 / self.cfgs[n]['frames'])
             fname_sets = [ self.fnames[n][i:i+n_files_per_set]
                             for i in range(0,len(self.fnames[n]),n_files_per_set)]
-                
+
             out_jsname = os.path.join(out_dir,"%s_func_%s.json"%(self.prj,n))
             with open(out_jsname,'w') as out_file:
                 json.dump(self.cfgs[n],out_file)
@@ -273,17 +265,33 @@ class AlignmentHelper(object):
                 sliceRed = slice(self.cfgs[n]['nchan']*p+self.cfgs[n]['red_ind'],None,self.cfgs[n]['nchan']*self.cfgs[n]['nz'])
                 sliceGreen = slice(self.cfgs[n]['nchan']*p+self.cfgs[n]['green_ind'],None,self.cfgs[n]['nchan']*self.cfgs[n]['nz'])
 
+                # first process the first set of the functional movies to get a template
+                first_args = args.pop(0)
+                i,template = motion_correct_file(first_args)
+
                 args = []
-                for inds_fnames in fname_sets:
+                template = None
+                for inds_fnames in fname_sets[1:]:
                     inds, fnames = list(zip(*inds_fnames))
-                    green_ofn = os.path.join(out_dir,"%s_func_mov_%s_p%s_%s_%s.tif"%(self.prj,n,p,min(inds),max(inds)))
-                    args.append((list(fnames),(p,list(inds)), self.save_dir, self.max_shifts, self.strides, self.overlaps,
-                          self.max_deviation_rigid, self.shifts_opencv, self.border_nan, sliceRed, sliceGreen, green_ofn))
+                    green_ofn = os.path.join(out_dir,"%s_func_mov_%s_p%s_%.4d_%.4d.tif"%(self.prj,n,p,min(inds),max(inds)))
+                    arg = (list(fnames),(p,list(inds)), template, self.mc_args, sliceRed, sliceGreen, green_ofn)
+                    if template is None:
+                        # first iteration run motion correction to get a template
+                        print("Processing first set of functional files to get a template")
+                        inds,template = motion_correct_file(arg)
+                        red_ofn = os.path.join(out_dir,"%s_func_red_%s_p%s_%.4d_%.4d.tif"%(self.prj,n,inds[0],min(inds[1]),max(inds[1])))
+                        tf.imsave(red_ofn, template)
+                    else:
+                        args.append(arg)
+
+
+
+                # now process the rest
                 pool = multiprocessing.Pool(min(self.num_proc,len(args)))
                 rets = pool.imap_unordered(motion_correct_file,args)
-                
+
                 for (inds, template) in rets:
-                    red_ofn = os.path.join(out_dir,"%s_func_red_%s_p%s_%s_%s.tif"%(self.prj,n,inds[0],min(inds[1]),max(inds[1])))
+                    red_ofn = os.path.join(out_dir,"%s_func_red_%s_p%s_%.4d_%.4d.tif"%(self.prj,n,inds[0],min(inds[1]),max(inds[1])))
                     tf.imsave(red_ofn, template)
 
     def align_func_to_struc(self):
