@@ -148,7 +148,7 @@ def motion_correct_file( args, n_iter=0,max_iter=10):
         if apply_subidx is not None:
             applied_mov = mc.apply_shifts_movie(in_fn,apply_subidx)
             applied_mov.save(apply_ofn)
-        return (ind, np.mean(mc.templates_rig,axis=0))
+        return (file_index, np.mean(mc.templates_rig,axis=0))
     except Exception as e:
         if n_iter < max_iter:
             print("Retrying %s due to %s"%(in_fn, e))
@@ -267,7 +267,7 @@ class AlignmentHelper(object):
 
                 args = []
                 template = None
-                for inds_fnames in fname_sets[1:]:
+                for inds_fnames in fname_sets:
                     inds, fnames = list(zip(*inds_fnames))
                     green_ofn = os.path.join(out_dir,"%s_func_mov_%s_p%s_%.4d_%.4d.tif"%(self.prj,n,p,min(inds),max(inds)))
                     arg = (list(fnames),(p,list(inds)), template, self.mc_args, sliceRed, sliceGreen, green_ofn)
