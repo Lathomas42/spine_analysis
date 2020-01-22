@@ -187,7 +187,7 @@ class AlignmentHelper(object):
             com_pre = os.path.commonprefix(fns)
             rev_fns = [f[::-1] for f in fns]
             com_suff = os.path.commonprefix(rev_fns)[::-1]
-            inds = [ int(s[len(com_pre):-len(com_suff)]) for s in fns ]
+            inds = [ int(s[len(com_pre):-len(com_suff)]) - 1 for s in fns ]
             self.fnames[x] = list(zip(inds,fns))
             struct_metadata = MetadataParser(self.fnames[x][0][1])
             self.cfgs[x]['type'] = 'struct' if x in self.struct_nums else 'func'
