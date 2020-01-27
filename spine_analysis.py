@@ -69,6 +69,8 @@ default_config = {
     "struct_nums":[2], #list of all _# for structural data
     "func_nums":[1], #list of all _# for functional data
     "num_proc": 4,
+    "yaw_range": [-5,5,1], # min max step
+    "tilt_range": [-5,5,1], # min_max_step
 }
 
 class MetadataParser(object):
@@ -291,37 +293,83 @@ class AlignmentHelper(object):
                     tf.imsave(red_ofn, template)
 
     def align_func_to_struc(self):
-                # now go through the avg red channels and find where they are in the larger volume
-                out_zarr = zarr.open(os.path.join(base_folder,"%s.zarr"%prj),'a')
-                #out_zarr.require_dataset('func_red_shifts',shape=(nplanes,2),dtype=np.float)
+        for sn in self.struct_nums:
+            in_tiffname = os.path.join(self.base_folder,"%s_struc_%s.tif"%(self.prj,sn))
+            if not os.path.exists(in_tiffname):
+                return Exception("%s is not found, please run struct align first" %in_tiffname)
 
-                rettot = []
-                for p in range(4):
-                    rets = []
+            in_data = tf.TiffFile(in_tiffname).asarray()
+            d_min = in_data.min(axis=(1,2),keepdims=True)
+            # hmm do some thresholding?
+            pcs = np.percentile(in_data,99.95,axis=(1,2),keepdims=True)
+            in_data = (in_data - d_min) / (pcs - d_min)
+            in_data[in_data > 1.0] = 1.0
+            in_data = (in_data * 255.0 ).astype(np.uint8)
 
-                    func_red =  cv2.medianBlur(out_zarr['func_red_avg'][p,:,:],3)
-                    func_red = (func_red - func_red.min()) / (func_red.max()-func_red.min())
-                    func_red = skimage.transform.resize(func_red, np.asarray(func_red.shape)*7.8//9.0)
-                    for i in range(len(out_zarr['struct_aligned_2'])):
-                        struct_red = out_zarr['struct_aligned_2'][i,:,:]
-                        struct_red = (struct_red - struct_red.min()) / (struct_red.max()-struct_red.min())
-                        ret=cv2.matchTemplate((func_red*255.0).astype(np.uint8), (struct_red*255.0).astype(np.uint8), cv2.TM_SQDIFF_NORMED)
-                        rets.append(cv2.minMaxLoc(ret))
-                    rettot.append(rets)
+            # now go through functional sets
+            locs = dict()
+            for n in self.func_nums:
+                if n not in locs:
+                    locs[n] = dict()
+                out_dir = os.path.join(self.base_folder,"func",str(n))
+                mag = self.cfgs[sn]['zoom'] / self.cfgs[n]['zoom']
+                for p in range(self.cfgs[n]['nz']):
+                    fred_fns = glob.glob(os.path.join(out_dir,"%s_func_red_%s_p%s_*.tif"%(self.prj,n,p)))
+                    for fred in fred_fns:
+                        plane_data = tf.TiffFile(fred).asarray()
+                        # normalize
+                        pc = np.percentile(plane_data,99.95)
+                        plane_data = (plane_data- plane_data.min()) / (pc - plane_data.min())
+                        plane_data[plane_data > 1.0] = 1.0
+                        plane_data = skimage.transform.resize(plane_data,np.asarray(plane_data.shape)*mag)
+                        plane_data[plane_data > 1.0] = 1.0
+                        # -> uint8
+                        plane_data = (plane_data*255.0).astype(np.uint8)
 
-
-                # In[ ]:
-
-
-                # can do some confirmation here that the planes are ~30 um apart
-                planes = np.argmin(rettot[:,:,0],axis=1)
-                out_zarr.require_dataset('func_green_planes',shape=planes.shape)
-                out_zarr['func_green_planes'] = planes
-                out_zarr.require_dataset('func_green_shifts',shape=(4,2))
-                for p in range(4):
-                    # load the green data and scale it and shift it
-                    out_zarr['func_green_shifts'][p,:] = rettot[p,planes[p],2]
-                    #skimage.transform.resize(mmgreen,np.asarray(mmgreen.shape)*[1,7.8,7.8]//[1,9,9])
+                        for z in range(in_data.shape[0]):
+                            ret=cv2.matchTemplate(plane_data, in_data[z,:,:], cv2.TM_SQDIFF_NORMED)
+                            rets.append(cv2.minMaxLoc(ret))
+                        locs[n][fred] = rets
+            js_out = os.path.join(self.base_folder,"func","func_plane_locs.json")
+            with open(js_out,'w') as outfile:
+                json.dump(locs, outfile)
+            #
+            # # now go through the angles because an expensive step is rotating the array
+            # for yaw in range(*self.yaw_range):
+            #     for tilt in range(*self.tilt_range):
+            #
+            #
+            #     # now go through the avg red channels and find where they are in the larger volume
+            #     out_zarr = zarr.open(os.path.join(base_folder,"%s.zarr"%prj),'a')
+            #     #out_zarr.require_dataset('func_red_shifts',shape=(nplanes,2),dtype=np.float)
+            #
+            #     rettot = []
+            #     for p in range(4):
+            #         rets = []
+            #
+            #         func_red =  cv2.medianBlur(out_zarr['func_red_avg'][p,:,:],3)
+            #         func_red = (func_red - func_red.min()) / (func_red.max()-func_red.min())
+            #         func_red = skimage.transform.resize(func_red, np.asarray(func_red.shape)*7.8//9.0)
+            #         for i in range(len(out_zarr['struct_aligned_2'])):
+            #             struct_red = out_zarr['struct_aligned_2'][i,:,:]
+            #             struct_red = (struct_red - struct_red.min()) / (struct_red.max()-struct_red.min())
+            #             ret=cv2.matchTemplate((func_red*255.0).astype(np.uint8), (struct_red*255.0).astype(np.uint8), cv2.TM_SQDIFF_NORMED)
+            #             rets.append(cv2.minMaxLoc(ret))
+            #         rettot.append(rets)
+            #
+            #
+            #     # In[ ]:
+            #
+            #
+            #     # can do some confirmation here that the planes are ~30 um apart
+            #     planes = np.argmin(rettot[:,:,0],axis=1)
+            #     out_zarr.require_dataset('func_green_planes',shape=planes.shape)
+            #     out_zarr['func_green_planes'] = planes
+            #     out_zarr.require_dataset('func_green_shifts',shape=(4,2))
+            #     for p in range(4):
+            #         # load the green data and scale it and shift it
+            #         out_zarr['func_green_shifts'][p,:] = rettot[p,planes[p],2]
+            #         #skimage.transform.resize(mmgreen,np.asarray(mmgreen.shape)*[1,7.8,7.8]//[1,9,9])
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description = "Run alignment and registration of volumes using python")
