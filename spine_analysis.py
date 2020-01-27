@@ -327,7 +327,7 @@ class AlignmentHelper(object):
                         plane_data[plane_data > 1.0] = 1.0
                         # -> uint8
                         plane_data = (plane_data*255.0).astype(np.uint8)
-
+                        rets = []
                         for z in range(in_data.shape[0]):
                             ret=cv2.matchTemplate(plane_data, in_data[z,:,:], cv2.TM_SQDIFF_NORMED)
                             rets.append(cv2.minMaxLoc(ret))
