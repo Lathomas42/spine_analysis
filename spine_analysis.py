@@ -293,6 +293,7 @@ class AlignmentHelper(object):
                     tf.imsave(red_ofn, template)
 
     def align_func_to_struc(self):
+        locs = dict()
         for sn in self.struct_nums:
             in_tiffname = os.path.join(self.base_folder,"%s_struc_%s.tif"%(self.prj,sn))
             if not os.path.exists(in_tiffname):
@@ -307,10 +308,11 @@ class AlignmentHelper(object):
             in_data = (in_data * 255.0 ).astype(np.uint8)
 
             # now go through functional sets
-            locs = dict()
+            if sn not in locs:
+                locs[sn] = dict()
             for n in self.func_nums:
-                if n not in locs:
-                    locs[n] = dict()
+                if n not in locs[sn]:
+                    locs[sn][n] = dict()
                 out_dir = os.path.join(self.base_folder,"func",str(n))
                 mag = self.cfgs[sn]['zoom'] / self.cfgs[n]['zoom']
                 for p in range(self.cfgs[n]['nz']):
@@ -321,7 +323,7 @@ class AlignmentHelper(object):
                         pc = np.percentile(plane_data,99.95)
                         plane_data = (plane_data- plane_data.min()) / (pc - plane_data.min())
                         plane_data[plane_data > 1.0] = 1.0
-                        plane_data = skimage.transform.resize(plane_data,np.asarray(plane_data.shape)*mag)
+                        plane_data = skimage.transform.resize(plane_data,np.round(np.asarray(plane_data.shape)*mag).astype(int))
                         plane_data[plane_data > 1.0] = 1.0
                         # -> uint8
                         plane_data = (plane_data*255.0).astype(np.uint8)
@@ -329,10 +331,10 @@ class AlignmentHelper(object):
                         for z in range(in_data.shape[0]):
                             ret=cv2.matchTemplate(plane_data, in_data[z,:,:], cv2.TM_SQDIFF_NORMED)
                             rets.append(cv2.minMaxLoc(ret))
-                        locs[n][fred] = rets
-            js_out = os.path.join(self.base_folder,"func","func_plane_locs.json")
-            with open(js_out,'w') as outfile:
-                json.dump(locs, outfile)
+                        locs[sn][n][fred] = rets
+        js_out = os.path.join(self.base_folder,"func","func_plane_locs.json")
+        with open(js_out,'w') as outfile:
+            json.dump(locs, outfile)
             #
             # # now go through the angles because an expensive step is rotating the array
             # for yaw in range(*self.yaw_range):
@@ -376,6 +378,7 @@ if __name__ == '__main__':
     parser.add_argument('config_file', help='path to config file for this task')
     parser.add_argument('--struct', action='store_true', help='align structural data')
     parser.add_argument('--func', action='store_true', help='align functional data (requires struct data to have been aligned)')
+    parser.add_argument('--register', action='store_true',help='register the functional planes to the structural data, requires the other two operations to be run first')
     args = parser.parse_args()
 
     if not os.path.exists(args.config_file):
@@ -389,6 +392,7 @@ if __name__ == '__main__':
         align_obj.align_structural_data()
     if args.func:
         align_obj.align_functional_data()
-
+    if args.register:
+        align_obj.align_func_to_struc()
 
 # %%
