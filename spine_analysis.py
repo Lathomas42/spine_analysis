@@ -327,12 +327,23 @@ class AlignmentHelper(object):
                         plane_data[plane_data > 1.0] = 1.0
                         # -> uint8
                         plane_data = (plane_data*255.0).astype(np.uint8)
-                        rets = []
+                        min_vals = []
+                        min_locs = []
                         for z in range(in_data.shape[0]):
                             ret=cv2.matchTemplate(plane_data, in_data[z,:,:], cv2.TM_SQDIFF_NORMED)
-                            rets.append(cv2.minMaxLoc(ret))
-                        locs[sn][n][fred] = rets
-        js_out = os.path.join(self.base_folder,"func","func_plane_locs.json")
+                            m,_,ml,_ = cv2.minMaxLoc(ret)
+                            min_vals.append(m)
+                            min_locs.append(ml)
+                        z = np.argmin(min_vals)
+                        min_loc = [int(x) for x in min_locs[z]]
+                        # put z at the beginning of coordinates
+                        min_loc.insert(0,int(z))
+                        mv = [min_vals[z]]
+                        # val,z,y,x
+                        mv.extend(min_loc)
+                        locs[sn][n][fred] = mv
+                        #locs[sn][n][fred] = rets
+        js_out = os.path.join(self.base_folder,"func","func_locs.json")
         with open(js_out,'w') as outfile:
             json.dump(locs, outfile)
             #
