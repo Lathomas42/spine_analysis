@@ -180,7 +180,7 @@ class AlignmentHelper(object):
         self.func_nums = cfg["func_nums"]
         self.num_proc=cfg["num_proc"]
         self.prj_dir = os.path.join(self.server_dir, self.prj)
-        self.debug = False
+        self.debug = True
         self.base_folder = os.path.join(cfg['output_dir'],self.prj)
 
         if not os.path.isdir(self.base_folder):
@@ -336,11 +336,11 @@ class AlignmentHelper(object):
                         min_vals = []
                         min_locs = []
                         for z in range(in_data.shape[0]):
-                            ret=cv2.matchTemplate(plane_data, in_data[z,:,:], cv2.TM_SQDIFF_NORMED)
-                            m,_,ml,_ = cv2.minMaxLoc(ret)
-                            min_vals.append(m)
-                            min_locs.append(ml)
-                        z = np.argmin(min_vals)
+                            ret=cv2.matchTemplate(plane_data, in_data[z,:,:], cv2.TM_CCORR_NORMED)
+                            m,M,mlm,ML = cv2.minMaxLoc(ret)
+                            min_vals.append(M)#m
+                            min_locs.append(ML)#ml
+                        z = np.argmax(min_vals)
                         min_loc = [int(x) for x in min_locs[z]]
                         # put z at the beginning of coordinates
                         min_loc.insert(0,int(z))
