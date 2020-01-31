@@ -71,7 +71,8 @@ default_config = {
     "num_proc": 4,
     "yaw_range": [-5,5,1], # min max step
     "tilt_range": [-5,5,1], # min_max_step
-}
+    "debug": False,
+    }
 
 class MetadataParser(object):
     def __init__(self, file):
@@ -173,7 +174,7 @@ class AlignmentHelper(object):
         self.func_nums = cfg["func_nums"]
         self.num_proc=cfg["num_proc"]
         self.prj_dir = os.path.join(self.server_dir, self.prj)
-
+        self.debug = False
         self.base_folder = os.path.join(cfg['output_dir'],self.prj)
 
         if not os.path.isdir(self.base_folder):
@@ -323,6 +324,7 @@ class AlignmentHelper(object):
                         pc = np.percentile(plane_data,99.95)
                         plane_data = (plane_data- plane_data.min()) / (pc - plane_data.min())
                         plane_data[plane_data > 1.0] = 1.0
+                        zs = plane_data.shape[0]
                         plane_data = skimage.transform.resize(plane_data,np.round(np.asarray(plane_data.shape)*mag).astype(int))
                         plane_data[plane_data > 1.0] = 1.0
                         # -> uint8
@@ -342,6 +344,19 @@ class AlignmentHelper(object):
                         # val,z,y,x
                         mv.extend(min_loc)
                         locs[sn][n][fred] = mv
+
+                        # for now lets save some images
+                        if self.debug:
+                            sd = os.path.join(self.base_folder,'func',str(n),'debug')
+                            if not os.path.isdir(sd):
+                                os.makedirs(sd)
+                            testname = '_'.join(fred.split('_')[-3:-1])
+                            fout = testname+'_%s_f.tif'%sn
+                            sout = testname+'_%s_s.tif'%sn
+                            tf1out = os.path.join(sd,fout)
+                            tf.imsave(tf1out,plane_data)
+                            tf2out = os.path.join(sd,sout)
+                            tf.imsave(tf2out,in_data[mv[1],:,:])
                         #locs[sn][n][fred] = rets
         js_out = os.path.join(self.base_folder,"func","func_locs.json")
         with open(js_out,'w') as outfile:

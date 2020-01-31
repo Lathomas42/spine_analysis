@@ -10,7 +10,6 @@
 #SBATCH --error=/global/home/users/logan_thomas/github/spine_analysis/slurm/logs/%x.%J.err
 
 
-source activate caiman
 PRJ=$1
 CFG=${SPINE_ANALYSIS_DIR}run_configs/${PRJ}.json
 if [ -f "$CFG" ]; then
