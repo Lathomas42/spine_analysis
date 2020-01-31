@@ -90,8 +90,14 @@ class MetadataParser(object):
 
     def get_channel_index(self,channel='red'):
         colors = self._get_var('SI.hChannels.channelMergeColor')[1:-1].split(';')
-        for e,ci in enumerate(self._get_var('SI.hChannels.channelSave')[1:-1].split(';')):
-            ind = int(ci)-1
+        cv = self._get_var('SI.hChannels.channelSave')
+        if '[' in cv:
+            for e,ci in enumerate(self._get_var('SI.hChannels.channelSave')[1:-1].split(';')):
+                ind = int(ci)-1
+                if colors[ind][1:-1] == channel:
+                    return ind
+        else:
+            ind = int(cv) - 1
             if colors[ind][1:-1] == channel:
                 return ind
         return -1
@@ -283,8 +289,6 @@ class AlignmentHelper(object):
                     else:
                         args.append(arg)
 
-
-
                 # now process the rest
                 pool = multiprocessing.Pool(min(self.num_proc,len(args)))
                 rets = pool.imap_unordered(motion_correct_file,args)
@@ -357,47 +361,10 @@ class AlignmentHelper(object):
                             tf.imsave(tf1out,plane_data)
                             tf2out = os.path.join(sd,sout)
                             tf.imsave(tf2out,in_data[mv[1],:,:])
-                        #locs[sn][n][fred] = rets
+
         js_out = os.path.join(self.base_folder,"func","func_locs.json")
         with open(js_out,'w') as outfile:
             json.dump(locs, outfile)
-            #
-            # # now go through the angles because an expensive step is rotating the array
-            # for yaw in range(*self.yaw_range):
-            #     for tilt in range(*self.tilt_range):
-            #
-            #
-            #     # now go through the avg red channels and find where they are in the larger volume
-            #     out_zarr = zarr.open(os.path.join(base_folder,"%s.zarr"%prj),'a')
-            #     #out_zarr.require_dataset('func_red_shifts',shape=(nplanes,2),dtype=np.float)
-            #
-            #     rettot = []
-            #     for p in range(4):
-            #         rets = []
-            #
-            #         func_red =  cv2.medianBlur(out_zarr['func_red_avg'][p,:,:],3)
-            #         func_red = (func_red - func_red.min()) / (func_red.max()-func_red.min())
-            #         func_red = skimage.transform.resize(func_red, np.asarray(func_red.shape)*7.8//9.0)
-            #         for i in range(len(out_zarr['struct_aligned_2'])):
-            #             struct_red = out_zarr['struct_aligned_2'][i,:,:]
-            #             struct_red = (struct_red - struct_red.min()) / (struct_red.max()-struct_red.min())
-            #             ret=cv2.matchTemplate((func_red*255.0).astype(np.uint8), (struct_red*255.0).astype(np.uint8), cv2.TM_SQDIFF_NORMED)
-            #             rets.append(cv2.minMaxLoc(ret))
-            #         rettot.append(rets)
-            #
-            #
-            #     # In[ ]:
-            #
-            #
-            #     # can do some confirmation here that the planes are ~30 um apart
-            #     planes = np.argmin(rettot[:,:,0],axis=1)
-            #     out_zarr.require_dataset('func_green_planes',shape=planes.shape)
-            #     out_zarr['func_green_planes'] = planes
-            #     out_zarr.require_dataset('func_green_shifts',shape=(4,2))
-            #     for p in range(4):
-            #         # load the green data and scale it and shift it
-            #         out_zarr['func_green_shifts'][p,:] = rettot[p,planes[p],2]
-            #         #skimage.transform.resize(mmgreen,np.asarray(mmgreen.shape)*[1,7.8,7.8]//[1,9,9])
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description = "Run alignment and registration of volumes using python")
