@@ -320,6 +320,10 @@ class AlignmentHelper(object):
                     locs[sn][n] = dict()
                 out_dir = os.path.join(self.base_folder,"func",str(n))
                 mag = self.cfgs[sn]['zoom'] / self.cfgs[n]['zoom']
+
+                # pad the in_data relative to the new zoom to allow overlap of 75%
+                pad = round(.25*512*mag)
+                padded_in = np.pad(in_data,((0,0),(pad,pad),(pad,pad)))
                 for p in range(self.cfgs[n]['nz']):
                     fred_fns = glob.glob(os.path.join(out_dir,"%s_func_red_%s_p%s_*.tif"%(self.prj,n,p)))
                     for fred in fred_fns:
@@ -328,18 +332,18 @@ class AlignmentHelper(object):
                         pc = np.percentile(plane_data,99.95)
                         plane_data = (plane_data- plane_data.min()) / (pc - plane_data.min())
                         plane_data[plane_data > 1.0] = 1.0
-                        zs = plane_data.shape[0]
                         plane_data = skimage.transform.resize(plane_data,np.round(np.asarray(plane_data.shape)*mag).astype(int))
                         plane_data[plane_data > 1.0] = 1.0
+
                         # -> uint8
                         plane_data = (plane_data*255.0).astype(np.uint8)
                         min_vals = []
                         min_locs = []
-                        for z in range(in_data.shape[0]):
-                            ret=cv2.matchTemplate(plane_data, in_data[z,:,:], cv2.TM_CCORR_NORMED)
-                            m,M,mlm,ML = cv2.minMaxLoc(ret)
+                        for z in range(padded_in.shape[0]):
+                            ret=cv2.matchTemplate(plane_data, padded_in[z,:,:], cv2.TM_CCORR_NORMED)
+                            _,M,_,ML = cv2.minMaxLoc(ret)
                             min_vals.append(M)#m
-                            min_locs.append(ML)#ml
+                            min_locs.append([x-pad for x in ML])#ml
                         z = np.argmax(min_vals)
                         min_loc = [int(x) for x in min_locs[z]]
                         # put z at the beginning of coordinates
@@ -347,6 +351,7 @@ class AlignmentHelper(object):
                         mv = [min_vals[z]]
                         # val,z,y,x
                         mv.extend(min_loc)
+                        mv.append(plane_data.shape[0])
                         locs[sn][n][fred] = mv
 
                         # for now lets save some images
@@ -360,7 +365,8 @@ class AlignmentHelper(object):
                             tf1out = os.path.join(sd,fout)
                             tf.imsave(tf1out,plane_data)
                             tf2out = os.path.join(sd,sout)
-                            tf.imsave(tf2out,in_data[mv[1],:,:])
+                            img = cv2.rectangle(in_data[mv[1],:,:],(mv[2],mv[3]),(mv[2]+mv[4],mv[2]+mv[4]),255,3)
+                            tf.imsave(tf2out,img)
 
         js_out = os.path.join(self.base_folder,"func","func_locs.json")
         with open(js_out,'w') as outfile:
